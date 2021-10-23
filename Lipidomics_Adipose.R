@@ -1,3 +1,7 @@
+setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
+library(tidyverse)
+library(janitor)
+
 # ==============================================================================
 # 0. Install necessary packages
 # ==============================================================================
@@ -17,7 +21,7 @@ metanr_packages <- function(){
     print("No new packages added...")
   }
 }
-
+metanr_packages()
 devtools::install_github("xia-lab/OptiLCMS", build = TRUE, build_vignettes = F)
 devtools::install_github("xia-lab/MetaboAnalystR", build = TRUE, build_vignettes = F)
 
@@ -83,89 +87,84 @@ RunLipidomics_mutiGroups <- function(pktablePath = ""){
   }
 }
 
-RunLipidomics_pairwise_Functional_analysis <- function(pktablePath = ""){
-  library(MetaboAnalystR)
-  prefix <- tools::file_path_sans_ext(pktablePath)
 
-  FunAnalysis<-InitDataObjects("pktable", "stat", FALSE);
-  FunAnalysis<-Read.TextData(FunAnalysis, pktablePath, "colu", "disc")
-  FunAnalysis<-SanityCheckData(FunAnalysis)
-  FunAnalysis<-ReplaceMin(FunAnalysis);
-  FunAnalysis<-FilterVariable(FunAnalysis, "iqr", "F", 25)
-  FunAnalysis<-PreparePrenormData(FunAnalysis)
-  FunAnalysis<-Normalization(FunAnalysis, "SumNorm", "NULL", "NULL", ratio=FALSE, ratioNum=20)
-  FunAnalysis<-Ttests.Anal(FunAnalysis, nonpar = F, threshp = 0.05, paired = FALSE, 
-                           equal.var = T, pvalType = "raw", all_results = T)
-  FunAnalysis<-Convert2Mummichog(FunAnalysis, rt=TRUE) # mummichog_input: m.z, r.tm p.value, t.score
-  
-  FunAnalysis<-InitDataObjects("mass_table", "mummichog", FALSE)
-  FunAnalysis<-SetPeakFormat(FunAnalysis, "mprt");
-  FunAnalysis<-UpdateInstrumentParameters(FunAnalysis, 5, "positive") # Ion Mode: Negative Mode; Mass Tolerance (ppm): 5.0
-  FunAnalysis<-Read.PeakListData(FunAnalysis, "mummichog_input_2021-10-11.txt"); # change date
-  FunAnalysis<-SanityCheckMummichogData(FunAnalysis) # Retention time tolerance
-  FunAnalysis<-SetPeakEnrichMethod(FunAnalysis, "mum", "v2")
-  
-  FunAnalysis<-SetMummichogPval(FunAnalysis, 0.25)
-  # FunAnalysis<-PerformPSEA(FunAnalysis, "mmu_kegg", libVersion = "current", permNum = 100)
-  # FunAnalysis<-PlotPeaks2Paths(FunAnalysis, paste0(prefix,"_peaks_to_KEGG_"), "pdf", 72, width=NA)
-  
-  FunAnalysis<-PerformPSEA(FunAnalysis, "main_lipid_class_mset", libVersion = "current", minLib = 3, permNum = 50)
-  FunAnalysis<-PlotPeaks2Paths(FunAnalysis, paste0(prefix,"_peaks_to_MLC_"), "pdf", 72, width=NA)
+# ==============================================================================
+# 1. Tidy data and run functions
+# ==============================================================================
+lipid_df <- read_csv("lipid_df.csv") %>% clean_names()
+identifications_df <- read_csv("Identificaitons.csv") %>% clean_names()
+lipid_database <- read_csv("lipid_database.csv") %>% clean_names()
 
-  # FunAnalysis<-PerformPSEA(FunAnalysis, "sub_lipid_class_mset", libVersion = "current", minLib = 3, permNum = 100)
-  # FunAnalysis<-PlotPeaks2Paths(FunAnalysis, paste0(prefix,"_peaks_to_SLC_"), "pdf", 72, width=NA)
-  
-  for (file in c("mum_raw.qs","complete_norm.qs","row_norm.qs","prenorm.qs",
-                 "preproc.qs","data_orig.qs","mummichog_input_2021-10-11.txt",
-                 "t_test.csv","t_test_all.csv","scattermum.json",
-                 "mummichog_query.json","mummichog_pathway_enrichment.csv",
-                 "mum_res.qs","mummichog_matched_compound_all.csv","initial_ecs.qs")){
-    file.rename(file, paste0(prefix,"_",file))
+# ==============================================================================
+# 2. Multi-groups analysis
+# ==============================================================================
+#Make annotations
+CompreLipids <- lipid_database %>% 
+  select(compound_id, category, main_class, sub_class, abbrev) %>% 
+  right_join(identifications_df, by="compound_id") %>%
+  select(compound, category, main_class, sub_class, abbrev) %>% 
+  right_join(lipid_df, by="compound") %>% 
+  select(compound:abbrev,starts_with("adi")) %>% 
+  filter(category != "NA") %>%
+  arrange(compound)
+
+#A small function for search 
+CompreLipids %>% filter(compound == "13.70_856.7474n") %>% data.table::as.data.table()
+
+#Refine lipids based on frequency (The most frequent label will be used to represent)
+compoundList <- unique(CompreLipids$compound)
+cns = c(colnames(CompreLipids), c("category_ratio","main_class_ratio","sub_class_ratio","abbrev_ratio"))
+refinedDF = data.frame(matrix(nrow=0, ncol = length(cns))) %>% as_tibble()
+colnames(refinedDF) <- cns
+LipidLevels <- c("category","main_class","sub_class","abbrev")
+
+for (i in compoundList){
+  tmp <- filter(CompreLipids, compound == i)
+  for (level in LipidLevels){
+    if (! is.na(tmp[,level][[1]][1])){
+      ranks <- table(tmp[,level]) %>% as.data.frame() %>% arrange(Freq)
+      tmp[1,level] <- as.vector(ranks$Var1[1])
+      ratio <- ranks[1,"Freq"]/unname(colSums(ranks[,2,drop = F]))
+      tmp[,paste0(level,"_ratio")] <- ratio
+    } else { 
+      tmp[1,level] <- NA
+      tmp[,paste0(level,"_ratio")] <- NA
+    }
   }
-  # mSet<-InitDataObjects("mass_table", "mummichog", FALSE)
-  # mSet<-SetPeakFormat(mSet, "pvalue")
-  # mSet<-UpdateInstrumentParameters(mSet, 5.0, "positive", "yes", 0.02);
-  # mSet<-SetRTincluded(mSet, "minutes")
-  # mSet<-Read.TextData(mSet, pktablePath, "colu", "disc");
-  # mSet<-SanityCheckMummichogData(mSet)
-  # mSet<-ReplaceMin(mSet)
-  # mSet<-SanityCheckMummichogData(mSet)
-  # mSet<-FilterVariable(mSet, "none", "F", 25)
-  # mSet<-PreparePrenormData(mSet)
-  # mSet<-Normalization(mSet, "NULL", "NULL", "NULL", ratio=FALSE, ratioNum=20)
-  # mSet<-PlotNormSummary(mSet, paste0(prefix,"_norm_"), "pdf", 72, width=NA)
-  # mSet<-PlotSampleNormSummary(mSet, paste0(prefix,"_snorm_"), "pdf", 72, width=NA)
-  # mSet<-SetPeakEnrichMethod(mSet, "mum", "v2")
-  # mSet<-DoPeakConversion(mSet)
-  # mSet<-SetMummichogPval(mSet, 0.05)
-  # mSet<-PerformPSEA(mSet, "mmu_kegg", "current", 3 , 100)
-  # mSet<-PlotPeaks2Paths(mSet, paste0(prefix,"_peaks_to_paths_"), "pdf", 72, width=NA)
-  # 
-  # mSet<-PerformPSEA(mSet, "main_lipid_class_mset", "current", 3 , 100)
-  # mSet<-PlotPeaks2Paths(mSet, paste0(prefix,"_peaks_to_MLC_"), "pdf", 72, width=NA)
+  refinedDF <- rbind(refinedDF, tmp[1,])  #Merge result
+}
+write.csv(file = "refinedDF_5depots.csv", refinedDF, row.names = F)
+
+#Run MetabolanalystR
+for (level in LipidLevels){
+  slectedrefinedDF <- refinedDF %>% 
+    filter(paste0(level,"_ratio") > 0.3) %>%
+    select_at(vars(level, starts_with("adi"))) %>%
+    group_by(!!as.name(level)) %>% 
+    summarise_all(c("sum")) %>% 
+    filter(level != "-")
+  
+  labels <- sub(level,"Label",gsub("_[1-3]","",colnames(slectedrefinedDF)))
+  slectedrefinedDF <- rbind(labels, slectedrefinedDF)
+  
+  write.csv(file = paste0(level,"_5depots.csv"), slectedrefinedDF, row.names = F)
+  write.csv(file = paste0(level,"_4depots.csv"), slectedrefinedDF[,1:13], row.names = F)
+  RunLipidomics_mutiGroups(pktablePath = paste0(level,"_5depots.csv"))
+  RunLipidomics_mutiGroups(pktablePath = paste0(level,"_4depots.csv"))
 }
 
-RunLipidomics_pairwise_Functional_analysis(pktablePath = "Compound_adi_epi+adi_ibat_depots.csv")
-
 # ==============================================================================
-# 2. Tidy data and run functions
+# 2. Pair-wise analysis
 # ==============================================================================
-setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
-library(tidyverse)
-
-lipid_df <- read_csv("lipid_df.csv")
-identifications_df <- read_csv("Identificaitons.csv")
-lipid_database <- read_csv("lipid_database.csv")
-
-### 2.1 Pair-wise analysis ####
 #Store matrix based on m/s_RT information mainly for pathway analysis
 lipid_df2 <- lipid_df %>% mutate(Compound = gsub("[a-z]|/","",compound)) %>% 
-  separate(Compound, c("RT", "MZ"), "_") %>% 
-  mutate(Compound = paste0(MZ,"__",RT)) %>% 
-  select(Compound,starts_with("adi"))
+  separate(compound, c("RT", "MZ"), "_") %>% 
+  mutate(compound = paste0(MZ,"__",RT)) %>% 
+  select(compound,starts_with("adi"))
 
 labels <- sub("Compound","Label", gsub("_[1-3]","",colnames(lipid_df2)))
 lipid_df2 <- rbind(labels, lipid_df2)
+
 #Output all depots
 write.csv(file = "Compound_5depots.csv", lipid_df2, row.names = F, quote = F)
 RunLipidomics_mutiGroups(pktablePath = "Compound_5depots.csv")
@@ -183,7 +182,7 @@ for (i in (1:ncol(pairwise))[-8]){
   }
 }
 
-### Pathway enrichment analysis
+### Pathway enrichment plot
 PathwayList <- c()
 for (file in list.files("./", pattern = "mummichog_pathway_enrichment.csv")){
   PathwayList <- c(PathwayList, read.csv(file)[,1])
@@ -225,64 +224,105 @@ ggplot(PathwayInte,aes(x = Condition, y = MainClass, size = EnrFactor, color = m
   )
 dev.off()
 
-### 2.2 Multi-groups analysis ####
-#NOTE: An ID might correspond to many rt_m/z values and vice verse
-colnames(identifications_df)[2] <- "compound_id"
-colnames(lipid_df)[1] <- "Compound"
+# ==============================================================================
+# 3. Specific Pair analysis
+# ==============================================================================
+library(ComplexHeatmap)
+library(RColorBrewer)
+library(circlize)
+library(tidyverse)
+Epi_Peri <- read_csv("refinedDF_5depots.csv") %>%
+  select_at(vars(category,main_class,sub_class,abbrev,starts_with("adi_epi"),starts_with("adi_peri"))) %>%
+  na.omit() %>%
+  filter(rowSums(across(where(is.numeric))) != 0) %>%
+  mutate_at(vars(adi_epi_1:adi_peri_3), funs(.*1000/sum(.))) 
 
-CompreLipids <- lipid_database %>% 
-  select(compound_id, category, main_class, sub_class, abbrev) %>% 
-  right_join(identifications_df, by="compound_id") %>%
-  select(Compound, category, main_class, sub_class, abbrev) %>% 
-  right_join(lipid_df, by="Compound") %>% 
-  select(Compound:abbrev,starts_with("adi")) %>% 
-  filter(category != "NA") %>%
-  arrange(Compound)
+write.csv(file = "Epi_Peri.csv", Epi_Peri, row.names = F)
 
-CompreLipids %>% filter(Compound == "13.60_898.7808m/z") %>% data.table::as.data.table()
-
-compoundList <- unique(CompreLipids$Compound)
-#The most frequent label will be used to represent
-cns = c(colnames(CompreLipids), c("category_ratio","main_class_ratio","sub_class_ratio","abbrev_ratio"))
-refinedDF = data.frame(matrix(nrow=0, ncol = length(cns))) %>% as_tibble()
-colnames(refinedDF) <- cns
-
-for (i in compoundList){
-  tmp <- filter(CompreLipids, Compound == i)
+HeatMapDraw <- function(DataFile = "Epi_Peri.csv",
+                        GroupAccordingTo = c("abbrev","sub_class")[2],
+                        KeywordSelected = "adi"){
   
-  for (level in c("category","main_class","sub_class","abbrev")){
+  cat("Processing",DataFile,"...\n")
+  sig_monkey <- read.csv(DataFile) %>% arrange(category) # remove mouse_obese6
+  
+  # 2.1 Monkey: Heatmaps of significant features
+  count_monkey <- sig_monkey %>% group_by(category) %>% count() 
+  annotation_col = data.frame(Condition = factor(rep(c("Epi", "Peri"),c(3,3)))) # variable 
+  annotation_row = data.frame(LipidCategory = factor(rep(c("FA", "GL", "GP","PK","PR","SL","SP", "ST"), 
+                                                         as.vector(count_monkey$n)))) # variable
+  ann_colors = list(
+    Condition = c(Epi = "#1B9E77", Peri = "#D95F02"),
+    LipidCategory = c(FA = "#66C2A5", GL = "#FC8D62", GP = "#8DA0CB", PK = "#E78AC3", 
+                      PR = "#A6D854",SL ="#E5C494", SP = "#FFD92F", ST = "#B3B3B3")
+  ) # variable
+  prefix <- tools::file_path_sans_ext(DataFile)
+  pdf(paste0(prefix,"_All_features_heatmap.pdf"), width = 10, height = 10)
+  p1 <- ComplexHeatmap::pheatmap(sig_monkey[,5:10], # variable, 2-11 columns are numeric data
+                                 scale = "row", cluster_rows = T, cluster_cols = T,
+                                 show_rownames = FALSE, show_colnames = T,
+                                 annotation_col = annotation_col, annotation_row = annotation_row,
+                                 annotation_colors = ann_colors,
+                                 annotation_legend = FALSE, annotation_names_col = FALSE,
+                                 annotation_names_row = F,
+                                 row_split = annotation_row$LipidCategory,
+                                 column_split = annotation_col$Condition,
+                                 fontsize = 12)
+  dev.off()
+  pdf(paste0(prefix,"_Cerimides_features_heatmap.pdf"), width = 10, height = 10)
+  Forplot <- sig_monkey %>% filter(main_class == "Ceramides [SP02]") %>% select(starts_with("adi"))
+  p <- ComplexHeatmap::pheatmap(Forplot, scale = "row", cluster_rows = T, cluster_cols = T,
+                                 show_rownames = T, show_colnames = T,
+                                 annotation_col = annotation_col, annotation_colors = ann_colors, 
+                                 annotation_legend = FALSE, annotation_names_col = FALSE,
+                                 annotation_names_row = F, column_split = annotation_col$Condition,
+                                 fontsize = 12)
+  dev.off()
+  # 3. Heatmaps of category/main_class/sub_class/abbrev levels
+  # 3.1 Split group into category-level
+  sig_monkey_grouped <- sig_monkey %>% group_split(category, .keep = TRUE)
+  names(sig_monkey_grouped) <- unique(sig_monkey$category)
+  
+  for (i in names(sig_monkey_grouped)){
     
-    if (! is.na(tmp[,level][[1]][1])){
-      ranks <- table(tmp[,level]) %>% as.data.frame() %>% arrange(Freq)
-      tmp[1,level] <- as.vector(ranks$Var1[1])
-      ratio <- ranks[1,"Freq"]/unname(colSums(ranks[,2,drop = F]))
-      tmp[,paste0(level,"_ratio")] <- ratio
-    } else { 
-      tmp[1,level] <- NA
-      tmp[,paste0(level,"_ratio")] <- NA
+    cat("Plotting on",GroupAccordingTo,"level for(",i,")...\n")
+    heatmap_data <- sig_monkey_grouped[[i]] %>% 
+      na.omit() %>% 
+      select_at(vars(GroupAccordingTo, starts_with(KeywordSelected))) %>%
+      group_by(!!as.name(GroupAccordingTo)) %>% 
+      filter(GroupAccordingTo != "-") %>% 
+      mutate_if(is.character,as.numeric) %>% 
+      summarise_all(c("sum")) %>%
+      filter(!!as.name(GroupAccordingTo) != "-") %>% 
+      as.data.frame()
+    
+    if (nrow(heatmap_data) > 0){
+      rownames(heatmap_data) <- gsub("\\[.*]/","/",heatmap_data[,GroupAccordingTo])
+      rownames(heatmap_data) <- gsub("\\[.*","",rownames(heatmap_data))
+      
+      heatmapdraw_matrix <- heatmap_data %>% select_at(vars(starts_with(KeywordSelected)))
+      write.csv(heatmapdraw_matrix, paste0(prefix,"_",GroupAccordingTo,"_",i,"_value.csv"), row.names=TRUE)
+      
+      annotation_col = data.frame(Condition = factor(rep(c("Epi", "Peri"),c(3,3))))
+      ann_colors = list(Condition = c(Epi = "#1B9E77", Peri = "#D95F02")) # ann_colors of monkeys
+      
+      pdf(paste0(prefix,"_",GroupAccordingTo,"_",i,"_heatmap.pdf"), width = 10, height = 10)
+      p2 <- ComplexHeatmap::pheatmap(heatmapdraw_matrix, 
+                                     cellwidth = 15, cellheight = 15,
+                                     scale = "row", cluster_rows = T, cluster_cols = T,
+                                     show_rownames = TRUE, show_colnames = T,
+                                     annotation_col = annotation_col, annotation_colors = ann_colors, 
+                                     annotation_legend = FALSE, annotation_names_col = FALSE,
+                                     column_split = annotation_col$Condition,
+                                     legend = TRUE, fontsize = 12)
+      dev.off()
     }
   }
-  #Merge result
-  refinedDF <- rbind(refinedDF, tmp[1,])
 }
 
-for (level in c("category","main_class","sub_class","abbrev")){
-  slectedrefinedDF <- refinedDF %>% 
-    filter(paste0(level,"_ratio") > 0.3) %>%
-    select_at(vars(level, starts_with("adi"))) %>%
-    group_by(!!as.name(level)) %>% 
-    summarise_all(c("sum")) %>% 
-    filter(level != "-") %>% 
-    mutate_at(vars(adi_epi_1:adi_ibat_3), funs(./sum(.)))
-  
-  labels <- sub(level,"Label",gsub("_[1-3]","",colnames(slectedrefinedDF)))
-  slectedrefinedDF <- rbind(labels, slectedrefinedDF)
-  
-  write.csv(file = paste0(level,"_5depots.csv"), slectedrefinedDF, row.names = F)
-  write.csv(file = paste0(level,"_4depots.csv"), slectedrefinedDF[,1:13], row.names = F)
-  RunLipidomics_mutiGroups(pktablePath = paste0(level,"_5depots.csv"))
-  RunLipidomics_mutiGroups(pktablePath = paste0(level,"_4depots.csv"))
-}
+HeatMapDraw(DataFile = "Epi_Peri.csv", KeywordSelected = "adi",
+            GroupAccordingTo = c("abbrev","sub_class","main_class")[2]
+            )
 
 # ==============================================================================
 # 2. Lipid abundance analysis
