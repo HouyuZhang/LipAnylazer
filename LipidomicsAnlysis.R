@@ -15,6 +15,7 @@ suppressPackageStartupMessages(library(circlize))
 suppressPackageStartupMessages(library(MetaboAnalystR))
 suppressPackageStartupMessages(library(ggrepel))
 suppressPackageStartupMessages(library(pls))
+suppressPackageStartupMessages(library(tools))
 
 ##' Standardize samples against internal controls within defined groups,
 ##' and map compound value (rt_m/z) against LipidMAPS database
@@ -124,7 +125,7 @@ standardize_by_standards <- function(MeasurementsFile = "",
 Format_mummichog_input <- function(STD_MeasurementsFile = "", 
                                    OutputPairWise = TRUE){
   
-  prefix <- tools::file_path_sans_ext(STD_MeasurementsFile)
+  prefix <- file_path_sans_ext(STD_MeasurementsFile)
   mummichog_MeasurementsFile <- read_csv(STD_MeasurementsFile, show_col_types = F) %>% clean_names() %>% 
     mutate(compound = gsub("[a-z]|/","",compound)) %>% 
     separate(compound, c("RT", "MZ"), "_") %>% 
@@ -167,7 +168,7 @@ mummichog_Functional_analysis <- function(pktablePath = "",
                                           PvalueThreshold = 0.2, 
                                           EnrichType = c("KEGG","MainClass","SubClass")[c(1,2)]){
 
-  prefix <- tools::file_path_sans_ext(pktablePath)
+  prefix <- file_path_sans_ext(pktablePath)
   
   FunAnalysis <- InitDataObjects("pktable", data.type = "stat", paired = FALSE);
   FunAnalysis <- Read.TextData(FunAnalysis, filePath = pktablePath, format = "colu", lbl.type = "disc")
@@ -273,7 +274,7 @@ Replot_mummichog <- function(mummichog_PEpath = ""){
 Refine_MZ_Identifications <- function(STD_MeasurementsFile = "",
                                       RefinePlan = c("PlanA","PlanB","PlanC")[3]){
   
-  prefix <- tools::file_path_sans_ext(STD_MeasurementsFile)
+  prefix <- file_path_sans_ext(STD_MeasurementsFile)
   MF_std <- read_csv(STD_MeasurementsFile, show_col_types = F) %>% clean_names()
   
   if ("PlanA" %in% RefinePlan){
@@ -420,7 +421,7 @@ HeatMapDraw <- function(DataFile = "",
                         KeywordSelected = "G"){
   
   cat("Processing",DataFile,"...\n")
-  prefix <- tools::file_path_sans_ext(DataFile)
+  prefix <- file_path_sans_ext(DataFile)
   MF_STD <- read_csv(DataFile) %>% arrange(category) %>% 
     filter(rowSums(across(where(is.numeric))) != 0)
   
@@ -517,13 +518,13 @@ volcano_plotting <- function(PlotFile = "",
   
   tbl <- table(volcano_pk$Group) 
   volcano_pk <- volcano_pk %>% 
-    transform(Group=case_when(Group == "Sig.Up" ~ paste0("Sig.Up [",tbl[["Sig.Up"]],"]"),
-                              Group == "Sig.Down" ~ paste0("Sig.Down [",tbl[["Sig.Down"]],"]"),
-                              Group == "Nonsig." ~ paste0("Nonsig. [",tbl[["Nonsig."]],"]")),
+    transform(Group=case_when(Group == "Sig.Up" ~ paste0("Sig.Up [",ifelse(is.na(tbl["Sig.Up"]),0,tbl[["Sig.Up"]]),"]"),
+                              Group == "Sig.Down" ~ paste0("Sig.Down [",ifelse(is.na(tbl["Sig.Down"]),0,tbl[["Sig.Down"]]),"]"),
+                              Group == "Nonsig." ~ paste0("Nonsig. [",ifelse(is.na(tbl["Nonsig."]),0,tbl[["Nonsig."]]),"]")),
               Label=case_when(Group == "Sig.Up" | Group == "Sig.Down" ~ x1,
                               Group == "Nonsig." ~ ""))
   
-  prefix <- tools::file_path_sans_ext(PlotFile)
+  prefix <- file_path_sans_ext(PlotFile)
   pdf(paste0(prefix,"_volcanoPlot_Custome_FC",ThresholdFC,"_Sig",ThresholdSig,".pdf"), height = 8, width = 12)
   p <- ggplot(volcano_pk, aes(x=log2_fc, y=log10_p, color=Group, label=Label)) +
     geom_point(shape=21) + 
@@ -555,16 +556,17 @@ volcano_plotting <- function(PlotFile = "",
 T_Anavo_plotting <- function(PlotFile = "",
                              ThresholdSig = 0.005){
   
-  prefix <- tools::file_path_sans_ext(PlotFile)
+  prefix <- file_path_sans_ext(PlotFile)
   T_Anavo_pk <- read_csv(PlotFile, show_col_types = FALSE) %>% 
     clean_names() %>% 
     transform(Group=case_when(p_value < ThresholdSig ~ "Significant",
                               p_value >= ThresholdSig  ~ "Nonsignificant"))
   
   tbl <- table(T_Anavo_pk$Group) 
+  
   T_Anavo_pk <- T_Anavo_pk %>% 
-    transform(Group=case_when(Group == "Significant" ~ paste0("Significant [",tbl[["Significant"]],"]"),
-                              Group == "Nonsignificant" ~ paste0("Nonsignificant [",tbl[["Nonsignificant"]],"]")),
+    transform(Group=case_when(Group == "Significant" ~ paste0("Significant [",ifelse(is.na(tbl["Significant"]),0,tbl[["Significant"]]),"]"),
+                              Group == "Nonsignificant" ~ paste0("Nonsignificant [",ifelse(is.na(tbl["Nonsignificant"]),0,tbl[["Nonsignificant"]]),"]")),
               Label=case_when(Group == "Significant" ~ x1,
                               Group == "Nonsignificant" ~ "")) %>%
     arrange(log10_p)
@@ -601,7 +603,7 @@ T_Anavo_plotting <- function(PlotFile = "",
 ##' 
 RunMetaboAnalystR <- function(pktablePath = ""){
 
-  prefix <- tools::file_path_sans_ext(pktablePath)
+  prefix <- file_path_sans_ext(pktablePath)
   # Step1. create the mSet Object, specifying that the data to be uploaded
   # is a peak table ("pktable") and that statistical analysis will be performed ("stat").
   mSet <- InitDataObjects(data.type = "pktable", anal.type = "stat", paired = FALSE)
@@ -681,7 +683,7 @@ RunMetaboAnalystR <- function(pktablePath = ""){
   
   for (fileName in c("data_orig.qs","preproc.qs","prenorm.qs","row_norm.qs","complete_norm.qs",
                      "pca_loadings.csv","pca_score.csv","plsda_coef.csv","plsda_loadings.csv",
-                     "plsda_score.csv","plsda_vip.csv",
+                     "plsda_score.csv","plsda_vip.csv"
   )){
     file.rename(fileName, paste0(prefix,"_",fileName))
   }
@@ -704,7 +706,7 @@ Analyze_Lipids <- function(STD_MeasurementsFile = "refinedDF_5depots.csv",
                           KeywordSelected="adi",
                           run_RunMetaboAnalystR = T){
   LipidLevels <- c("category","main_class","sub_class","abbrev")
-  prefix <- tools::file_path_sans_ext(STD_MeasurementsFile)
+  prefix <- file_path_sans_ext(STD_MeasurementsFile)
   
   for (level in LipidLevels){
     slectedrefinedDF <- read_csv(STD_MeasurementsFile, show_col_types = FALSE) %>% 
@@ -739,6 +741,11 @@ Analyze_Lipids <- function(STD_MeasurementsFile = "refinedDF_5depots.csv",
     }
   }
 }
+
+Analyze_Lipids(STD_MeasurementsFile = "refinedDF_5depots.csv",
+               OutputPairWise = T,
+               KeywordSelected="adi",
+               run_RunMetaboAnalystR = T)
 
 #=========================================================================================
 # Run example
