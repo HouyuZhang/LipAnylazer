@@ -161,8 +161,8 @@ Format_mummichog_input <- function(MeasurementsFile_standardized = "",
     select(-c(RT:minimum_cv_percent)) %>%
     unique()
   
-  colnames(mummichog_MeasurementsFile) <- c("Label",c("G1_1","G1_2","G1_3","G2_1","G2_2","G2_3",
-                                                      "G3_1","G3_2","G3_3","G4_1","G4_2","G4_3"))
+  # colnames(mummichog_MeasurementsFile) <- c("Label",c("G1_1","G1_2","G1_3","G2_1","G2_2","G2_3",
+  #                                                     "G3_1","G3_2","G3_3","G4_1","G4_2","G4_3"))
   
   labels <- gsub("_[0-9]+","",colnames(mummichog_MeasurementsFile))
   mummichog_MeasurementsFile <- rbind(labels, mummichog_MeasurementsFile)
