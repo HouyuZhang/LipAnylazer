@@ -18,6 +18,10 @@ suppressPackageStartupMessages(library(ggrepel))
 suppressPackageStartupMessages(library(pls))
 suppressPackageStartupMessages(library(tools))
 
+#=========================================================================================
+# Released functions
+#=========================================================================================
+
 ##' Standardize samples against internal controls within defined groups
 ##' 
 ##' @param MeasurementsFile LPMS output file containing compound signal across sample
@@ -128,12 +132,13 @@ MatchLipidMAPS <- function(MeasurementsFile_standardized = "",
     select(compound_id, mass, category, main_class, sub_class, abbrev) %>% 
     right_join(identification, by="compound_id") %>% 
     select(compound, category, main_class, sub_class, abbrev) %>% 
-    right_join(MF_standardized_Slected, by="compound") %>% 
+    right_join(MF_standardized, by="compound") %>% 
     filter(category != "NA") %>%
     select(-c(neutral_mass_da:minimum_cv_percent)) %>% 
     arrange(compound) 
   
   write.csv(MF_standardized_matched, MeasurementsFile_standardized_matched, row.names = F)
+  cat("Finished matching LipidMAPS database!\n")
 }
 
 
@@ -150,7 +155,8 @@ MatchLipidMAPS <- function(MeasurementsFile_standardized = "",
                      
 Format_mummichog_input <- function(MeasurementsFile_standardized = "", 
                                    OutputPairWise = TRUE,
-                                   SelectedSample = c("epi","Peri","ibat")){
+                                   SelectedSample = "",
+                                   run_mummichog_Functional_analysis = T){
   
   prefix <- file_path_sans_ext(MeasurementsFile_standardized)
   mummichog_MeasurementsFile <- read_csv(MeasurementsFile_standardized, show_col_types = F) %>% clean_names() %>% 
@@ -168,6 +174,11 @@ Format_mummichog_input <- function(MeasurementsFile_standardized = "",
   mummichog_MeasurementsFile <- rbind(labels, mummichog_MeasurementsFile)
   write.csv(file = paste0(prefix,"_mummichogInput.csv"), mummichog_MeasurementsFile, row.names = F)
   
+  if(run_mummichog_Functional_analysis){
+    mummichog_Functional_analysis(pktablePath = paste0(prefix,"_mummichogInput.csv"), PvalueThreshold = 0.05, Species = "mmu", 
+                                  rowNormMet = "SumNorm",EnrichType = c("KEGG","MainClass"))
+  }
+  
   if(OutputPairWise){
     groups <- unique(gsub("_[0-9]+","",colnames(mummichog_MeasurementsFile))[-1])
     if (length(groups) > 1){
@@ -175,9 +186,14 @@ Format_mummichog_input <- function(MeasurementsFile_standardized = "",
       for (i in 1:ncol(pairwise)){
         x = pairwise[1,i]
         y = pairwise[2,i]
-        tmp <- mummichog_MeasurementsFile %>% select(Label,starts_with(x),starts_with(y))
+        tmp <- mummichog_MeasurementsFile %>% select(Label, starts_with(x), starts_with(y))
         fileName <- paste0(prefix,"_mummichogInput_",x,"+",y,".csv")
         write.csv(file = fileName, tmp, row.names = F, quote = F)
+        
+        if(run_mummichog_Functional_analysis){
+          mummichog_Functional_analysis(pktablePath = fileName, PvalueThreshold = 0.4, Species = "mmu", 
+                                        rowNormMet = "SumNorm",EnrichType = c("KEGG","MainClass"))
+        }
       }
     }
   }
@@ -186,8 +202,12 @@ Format_mummichog_input <- function(MeasurementsFile_standardized = "",
     tmp <- mummichog_MeasurementsFile %>% select(Label,starts_with(SelectedSample))
     fileName <- paste0(prefix,"_mummichogInput_",paste0(SelectedSample, collapse = "+"),".csv")
     write.csv(file = fileName, tmp, row.names = F, quote = F)
+    if(run_mummichog_Functional_analysis){
+      mummichog_Functional_analysis(pktablePath = fileName, PvalueThreshold = 0.4, Species = "mmu", 
+                                    rowNormMet = "SumNorm",EnrichType = c("KEGG","MainClass"))
+    }
   }
-  
+  cat("Finished converting compound to mummichog supported format!\n")
 }
 
 ##' Do mummichog analysis on KEGG/MainClass/SubClass using m/z__rt information
@@ -449,6 +469,7 @@ Refine_MZ_Identifications <- function(MeasurementsFile_standardized_matched = ""
     }
     write.csv(x = refinedDF, file = paste0(prefix,"_refined_PlanC.csv"), row.names = F)
   }
+  cat("Finished refining lipids using",RefinePlan,"\n")
 }
 
 ##' Draw costume Volcano Plot using ggplot
@@ -479,13 +500,20 @@ volcano_plotting <- function(PlotFile = "",
                               Group == "Nonsig." ~ paste0("Nonsig. [",ifelse(is.na(tbl["Nonsig."]),0,tbl[["Nonsig."]]),"]")))
   
   volcano_pk$Label <- ""
-  UpShownNum <- ifelse(tbl[["Sig.Up"]] < TopUpDownShown[1], tbl[["Sig.Up"]], TopUpDownShown[1])
-  UpShownItem <- volcano_pk %>% arrange(desc(log10_p)) %>% filter(str_detect(Group, "Sig.Up")) %>% slice(1:UpShownNum)
-  volcano_pk$Label[volcano_pk$x1 %in% UpShownItem$x1] <- UpShownItem$x1
   
-  DownShownNum <- ifelse(tbl[["Sig.Down"]] < TopUpDownShown[2], tbl[["Sig.Down"]], TopUpDownShown[2])
-  DownShownItem <- volcano_pk %>% arrange(desc(log10_p)) %>% filter(str_detect(Group, "Sig.Down")) %>% slice(1:DownShownNum)
-  volcano_pk$Label[volcano_pk$x1 %in% DownShownItem$x1] <- DownShownItem$x1
+  JudgeNumUp <- ifelse(is.na(tbl["Sig.Up"]),0,tbl[["Sig.Up"]])
+  if(JudgeNumUp !=0 ){
+    UpShownNum <- ifelse(JudgeNumUp < TopUpDownShown[1], JudgeNumUp, TopUpDownShown[1])
+    UpShownItem <- volcano_pk %>% arrange(desc(log10_p)) %>% filter(str_detect(Group, "Sig.Up")) %>% slice(1:UpShownNum)
+    volcano_pk$Label[volcano_pk$x1 %in% UpShownItem$x1] <- UpShownItem$x1
+  }
+
+  JudgeNumDown <- ifelse(is.na(tbl["Sig.Down"]),0,tbl[["Sig.Down"]])
+  if(JudgeNumDown != 0){
+    DownShownNum <- ifelse(JudgeNumDown < TopUpDownShown[2], JudgeNumDown, TopUpDownShown[2])
+    DownShownItem <- volcano_pk %>% arrange(desc(log10_p)) %>% filter(str_detect(Group, "Sig.Down")) %>% slice(1:DownShownNum)
+    volcano_pk$Label[volcano_pk$x1 %in% DownShownItem$x1] <- DownShownItem$x1
+  }
   
   prefix <- file_path_sans_ext(PlotFile)
   pdf(paste0(prefix,"_volcanoPlot_Custome_FC",ThresholdFC,"_Sig",ThresholdSig,".pdf"), height = 8, width = 12)
@@ -535,9 +563,13 @@ T_Anavo_plotting <- function(PlotFile = "",
     arrange(eval(parse(text = SigIndex)))
   
   T_Anavo_pk$Label <- ""
-  TopShownNum <- ifelse(tbl[["Significant"]] < TopShown, tbl[["Significant"]], TopShown)
-  TopShownItem <- T_Anavo_pk %>% filter(str_detect(Group, "Significant")) %>% slice(1:TopShownNum)
-  T_Anavo_pk$Label[T_Anavo_pk$x1 %in% TopShownItem$x1] <- TopShownItem$x1
+  JudgeNum <- ifelse(is.na(tbl["Significant"]),0,tbl[["Significant"]])[[1]]
+  
+  if(JudgeNum != 0){
+    TopShownNum <- ifelse(JudgeNum < TopShown, JudgeNum, TopShown)
+    TopShownItem <- T_Anavo_pk %>% filter(str_detect(Group, "Significant")) %>% slice(1:TopShownNum)
+    T_Anavo_pk$Label[T_Anavo_pk$x1 %in% TopShownItem$x1] <- TopShownItem$x1
+  }
   
   # T_Anavo_pk$x1 <- factor(T_Anavo_pk$x1, levels = T_Anavo_pk$x1)
   
@@ -812,8 +844,9 @@ HeatMapDraw <- function(MeasurementsFile_standardized_matched_refined = "",
 }
 
 #=========================================================================================
-
-RelativeDiffPlot <- function(MeasurementsFile_standardized_matched_refined = "refinedDF_5depots.csv",
+# Developing functions
+#=========================================================================================
+.RelativeDiffPlot <- function(MeasurementsFile_standardized_matched_refined = "refinedDF_5depots.csv",
                              OutputPairWise = T,
                              SelectedSample = c("adi_epi","adi_peri")){
   
@@ -873,49 +906,84 @@ RelativeDiffPlot <- function(MeasurementsFile_standardized_matched_refined = "re
     scale_size(name="P_value")
 }
 
+.LipidAbundancePlot <- function(MeasurementsFile_standardized_matched_refined = ""){
+  
+  mergedDf1 <- mergedDf[,c(70,16:30)] %>% as.data.frame()
+  for (i in 2:16){
+    for (j in 1:nrow(mergedDf1)){
+      if (mergedDf1[j,i] != 0){mergedDf1[j,i] <- mergedDf1[j,1]}
+      else {mergedDf1[j,i] <- "ND"}
+    }
+  }
+  
+  LipidClass <- mergedDf1[,-1] %>% map(table) %>% as.data.frame() 
+  rownames(LipidClass) <- LipidClass$adi_epi_1.Var1
+  LipidClass <- LipidClass[,seq(2,30,2)] %>% t() %>% as.data.frame()
+  LipidClass$stage <- sub(".Freq","",rownames(LipidClass))
+  LipidClass <- reshape2::melt(LipidClass, id = "stage")
+  LipidClass <- LipidClass[-grep("ND",LipidClass$variable),]
+  LipidClass$stage <- factor(LipidClass$stage, levels = unique(LipidClass$stage))
+  LipidClass$variable <- factor(LipidClass$variable,levels = unique(LipidClass$variable)[c(4:8,1,3,2)])
+  
+  pdf("Detected lipid species in each stage.pdf", height = 7, width = 9)
+  ggplot(LipidClass, aes(x=stage, y=value, fill=variable)) +
+    geom_bar(color="black", stat="identity") +
+    theme_bw() +
+    labs(x="", y = "Identified number lipid species") +
+    scale_fill_manual(values = brewer.pal(n = 8, name = "Dark2")) +
+    theme(
+      axis.text.x = element_text(color="black", size=14, face="bold",angle = 45, hjust=1),
+      axis.title.y = element_text(color="black", size=20, face="bold"),
+      axis.text.y = element_text(color="black", size=14, face="bold"),
+      legend.title = element_blank(), 
+      legend.text = element_text(color="black", size=12, face="bold")
+    )
+  dev.off()
+}
+
 #=========================================================================================
-# Run example
+# Run example functions
 #=========================================================================================
-standardize_by_standards(MeasurementsFile = "test1.csv",
-                         ISMeasurementsFile = "IS-Measurements-1.xls",
-                         MeasurementsFile_standardized = "test1_standardized.csv",
-                         GroupLabel = list(c(1),c(2:4),c(5:7),c(8:10),c(11:13),c(14:16),
-                                               c(17:19),c(20:22),c(23:25),c(26:28),c(29:31),c(32:34),
-                                               c(35:37),c(38:42),c(43:47),c(48:50),c(51:53)))
-
-MatchLipidMAPS(MeasurementsFile_standardized = "test1_standardized.csv",
-               IdentificationFile = "Identifications-1.csv",
-               LipidMAPSDB = "lipid_database.csv",
-               OutUnmatchedLipids = T,
-               MeasurementsFile_standardized_matched = "test1_standardized_matched.csv"
-)
-
-Format_mummichog_input(MeasurementsFile_standardized = "standardized_Measurements1_Converted.csv",
-                       OutputPairWise = T, SelectedSample = c("epi","Peri","ibat"))
-
-mummichog_Functional_analysis(pktablePath = "standardized_Measurements1_Converted_mummichogInput_G1+G3.csv",
-                              PvalueThreshold = 0.5, Species = c("mmu","hsa")[2], rowNormMet = c("SumNorm","NULL")[2],
-                              EnrichType = c("KEGG","MainClass","SubClass")[c(1,2)])
-
-Replot_mummichog(mummichog_PEpath = "./")
-
-Refine_MZ_Identifications(STD_MeasurementsFile = "standardized_Measurements1_Converted.csv",
-                          RefinePlan = c("PlanA","PlanB","PlanC")[3])
-
-volcano_plotting(PlotFile = "refinedDF_5depots_abbrev_adi_epi+adi_ibat_volcano.csv",
-                 ThresholdFC = 1.5, ThresholdSig = 0.05, TopUpDownShown = c(10,10))
-
-T_Anavo_plotting(PlotFile = "refinedDF_5depots_abbrev_anova_posthoc.csv",
-                 SigIndex = c("p_value","fdr")[1],ThresholdSig = 0.005,TopShown = 10)
-
-HeatMapDraw(DataFile = "Epi_Peri.csv",
-            KeywordSelected = "G",
-            PlotSpecific = c("main_class","Ceramides [SP02]"),
-            GroupScheme = c(rep(c("Epi", "Peri"),c(3,3))),
-            GroupAccordingTo = c("abbrev","sub_class","main_class")[2]
-)
-
-Analyze_Lipids(STD_MeasurementsFile = "refinedDF_5depots.csv",
-              OutputPairWise = T,
-              KeywordSelected="adi",
-              run_RunMetaboAnalystR = T)
+# standardize_by_standards(MeasurementsFile = "test1.csv",
+#                          ISMeasurementsFile = "IS-Measurements-1.xls",
+#                          MeasurementsFile_standardized = "test1_standardized.csv",
+#                          GroupLabel = list(c(1),c(2:4),c(5:7),c(8:10),c(11:13),c(14:16),
+#                                                c(17:19),c(20:22),c(23:25),c(26:28),c(29:31),c(32:34),
+#                                                c(35:37),c(38:42),c(43:47),c(48:50),c(51:53)))
+# 
+# MatchLipidMAPS(MeasurementsFile_standardized = "test1_standardized.csv",
+#                IdentificationFile = "Identifications-1.csv",
+#                LipidMAPSDB = "lipid_database.csv",
+#                OutUnmatchedLipids = T,
+#                MeasurementsFile_standardized_matched = "test1_standardized_matched.csv"
+# )
+# 
+# Format_mummichog_input(MeasurementsFile_standardized = "standardized_Measurements1_Converted.csv",
+#                        OutputPairWise = T, SelectedSample = c("epi","Peri","ibat"))
+# 
+# mummichog_Functional_analysis(pktablePath = "standardized_Measurements1_Converted_mummichogInput_G1+G3.csv",
+#                               PvalueThreshold = 0.5, Species = c("mmu","hsa")[2], rowNormMet = c("SumNorm","NULL")[2],
+#                               EnrichType = c("KEGG","MainClass","SubClass")[c(1,2)])
+# 
+# Replot_mummichog(mummichog_PEpath = "./")
+# 
+# Refine_MZ_Identifications(STD_MeasurementsFile = "standardized_Measurements1_Converted.csv",
+#                           RefinePlan = c("PlanA","PlanB","PlanC")[3])
+# 
+# volcano_plotting(PlotFile = "refinedDF_5depots_abbrev_adi_epi+adi_ibat_volcano.csv",
+#                  ThresholdFC = 1.5, ThresholdSig = 0.05, TopUpDownShown = c(10,10))
+# 
+# T_Anavo_plotting(PlotFile = "refinedDF_5depots_abbrev_anova_posthoc.csv",
+#                  SigIndex = c("p_value","fdr")[1],ThresholdSig = 0.005,TopShown = 10)
+# 
+# HeatMapDraw(DataFile = "Epi_Peri.csv",
+#             KeywordSelected = "G",
+#             PlotSpecific = c("main_class","Ceramides [SP02]"),
+#             GroupScheme = c(rep(c("Epi", "Peri"),c(3,3))),
+#             GroupAccordingTo = c("abbrev","sub_class","main_class")[2]
+# )
+# 
+# Analyze_Lipids(STD_MeasurementsFile = "refinedDF_5depots.csv",
+#               OutputPairWise = T,
+#               KeywordSelected="adi",
+#               run_RunMetaboAnalystR = T)
