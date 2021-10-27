@@ -1,10 +1,11 @@
 #=========================================================================================
 # This script contain main functions used for lipidomics analysis
 
-# Version 1.2 created by Houyu Zhang on 2021/10/23
+# Version 1.3 created by Houyu Zhang on 2021/10/27
 # Issue report on Hughiez047@gmail.com
 # Copyright (c) 2021 __CarlosLab@PKU__. All rights reserved.
 #=========================================================================================
+
 setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
 suppressPackageStartupMessages(library(tidyverse))
 suppressPackageStartupMessages(library(readxl))
@@ -17,41 +18,34 @@ suppressPackageStartupMessages(library(ggrepel))
 suppressPackageStartupMessages(library(pls))
 suppressPackageStartupMessages(library(tools))
 
-##' Standardize samples against internal controls within defined groups,
-##' and map compound value (rt_m/z) against LipidMAPS database
+##' Standardize samples against internal controls within defined groups
 ##' 
 ##' @param MeasurementsFile LPMS output file containing compound signal across sample
 ##' @param ISMeasurementsFile LPMS output file containing counts for internal standards
-##' @param IdentificationFile LPMS output file containing possible identification for this LPMS experiment 
-##' @param LipidMAPSDB A lipid information database file downloaded from LIPIDMAPS website
-##' @param Output_MeasurementsFile Specify a output file name for standardized-converted lipid signals
+##' @param MeasurementsFile_standardized Specify a output csv file name for standardized-converted lipid signals
 ##' @param GroupLabel Defined groups for the excel sheet which will be standardized together
 ##' @examples
 ##'
-##' standardize_by_standards(MeasurementsFile = "test1.csv", 
-##'                         ISMeasurementsFile = "IS-Measurements-1.xls",
-##'                         IdentificationFile = "Identifications-1.csv",
-##'                         LipidMAPSDB = "lipid_database.csv",
-##'                         Output_MeasurementsFile = "standardized_test1_Converted_zhy.csv",
-##'                         GroupLabel = list(c(1),c(2:4),c(5:7),c(8:10),c(11:13),c(14:16),
+##' standardize_by_standards(MeasurementsFile = "test1.csv",
+##'                          ISMeasurementsFile = "IS-Measurements-1.xls",
+##'                          MeasurementsFile_standardized = "test1_standardized.csv",
+##'                          GroupLabel = list(c(1),c(2:4),c(5:7),c(8:10),c(11:13),c(14:16),
 ##'                                                c(17:19),c(20:22),c(23:25),c(26:28),c(29:31),c(32:34),
 ##'                                                c(35:37),c(38:42),c(43:47),c(48:50),c(51:53)))
-##'
 
 standardize_by_standards <- function(MeasurementsFile = "", 
                                      ISMeasurementsFile = "", 
-                                     IdentificationFile = "",
-                                     LipidMAPSDB = "", 
-                                     Output_MeasurementsFile = "", 
+                                     MeasurementsFile_standardized = "", 
                                      GroupLabel = list()){
   
-  MF_original <- read_csv(MeasurementsFile, skip = 2, show_col_types = F) %>% clean_names()
+  MF_original <- read_csv(MeasurementsFile, skip = 2, show_col_types = F) %>% clean_names() %>% 
+    filter(retention_time_min > 1.5)
   #Count total sample numbers through GroupLabel
   SampleNumbers <- max(unlist(GroupLabel))
   #First 13 cols are MS meta-information
   SampleColStartFrom <- 13 + SampleNumbers 
   MF_standardized <- MF_original
-  
+
   #Since Standards might differ across defined group, consistent Standards will be used
   ReplicatesStandards <- list()
   for (item in 1:length(GroupLabel)){
@@ -92,80 +86,127 @@ standardize_by_standards <- function(MeasurementsFile = "",
         as.numeric(MF_original[LipidNum,sampleNum + SampleColStartFrom])/as.numeric(IS[index,"detector_counts"])
     }
   }
+  write.csv(MF_standardized[,-c(14:(13+SampleNumbers))], MeasurementsFile_standardized, row.names = F)
+
+  cat("<<",MeasurementsFile,">> has been standardized using information in <<",ISMeasurementsFile, 
+      ">> and wrote into <<",MeasurementsFile_standardized,">>\n")
+}
+
+##' Map standardized compounds(rt_m/z) against LipidMAPS database
+##' 
+##' @param MeasurementsFile_standardized A standardized lipid file output by standardize_by_standards() 
+##' @param IdentificationFile LPMS output file containing possible identification for this LPMS experiment 
+##' @param LipidMAPSDB A lipid information database file downloaded from LIPIDMAPS website
+##' @param OutUnmatchedLipids Whether output unmatched lipids through the LIPIDMAPS database (identification = 0)
+##' @param MeasurementsFile_standardized_matched Output matched file
+##' @examples
+##' 
+##' MatchLipidMAPS(MeasurementsFile_standardized = "test1_standardized.csv",
+##'                IdentificationFile = "Identifications-1.csv",
+##'                LipidMAPSDB = "lipid_database.csv",
+##'                OutUnmatchedLipids = T,
+##'                MeasurementsFile_standardized_matched = "test1_standardized_matched.csv"
+##' )
+
+MatchLipidMAPS <- function(MeasurementsFile_standardized = "",
+                           IdentificationFile = "",
+                           LipidMAPSDB = "",
+                           OutUnmatchedLipids = T,
+                           MeasurementsFile_standardized_matched = ""){
   
-  MF_standardized_Slected <- MF_standardized[,-c(14:(13+SampleNumbers))]
+  MF_standardized <- read_csv(MeasurementsFile_standardized, show_col_types = F) %>% clean_names()
   identification <- read_csv(IdentificationFile, show_col_types = F) %>% clean_names()
   lipid_database <- read_csv(LipidMAPSDB, show_col_types = F) %>% clean_names()
   
-  Converted_standardize_MeasurementsFile <- lipid_database %>% 
-    select(compound_id, category, main_class, sub_class, abbrev) %>% 
+  if(OutUnmatchedLipids){
+    prefix <- file_path_sans_ext(MeasurementsFile_standardized)
+    UM <- MF_standardized %>% filter(identifications == 0) %>% select(-c(neutral_mass_da:minimum_cv_percent))
+    write.csv(x = UM, file = paste0(prefix,"_unmatched.csv"), row.names = F)
+  }
+
+  MF_standardized_matched <- lipid_database %>% 
+    select(compound_id, mass, category, main_class, sub_class, abbrev) %>% 
     right_join(identification, by="compound_id") %>% 
     select(compound, category, main_class, sub_class, abbrev) %>% 
     right_join(MF_standardized_Slected, by="compound") %>% 
     filter(category != "NA") %>%
     select(-c(neutral_mass_da:minimum_cv_percent)) %>% 
-    arrange(compound)
+    arrange(compound) 
   
-  write.csv(x = Converted_standardize_MeasurementsFile, file = Output_MeasurementsFile, row.names = F)
-
-  cat("<<",MeasurementsFile,">> has been standardized using information in <<",ISMeasurementsFile, 
-      ">> and wrote into <<",Output_MeasurementsFile,">>\n")
+  write.csv(MF_standardized_matched, MeasurementsFile_standardized_matched, row.names = F)
 }
+
 
 ##' Convert Standard (STD) Lipid signal file to mummichog accepted format (m/z__rt)
 ##' 
 ##' @param STD_MeasurementsFile same as the Output_MeasurementsFile from standardize_by_standards()
 ##' @param OutputPairWise Besides output all samples, indicate whether output pairwise samples
+##' @param SelectedSample Specify samples head with these strings for output in a file
 ##' @examples
 ##'
-##' Format_mummichog_input(STD_MeasurementsFile = "standardized_Measurements1_Converted.csv", 
-##'                      OutputPairWise = T)
-##'                      
+##' Format_mummichog_input(MeasurementsFile_standardized = "standardized_Measurements1_Converted.csv",
+##'                        OutputPairWise = T, SelectedSample = c("epi","Peri","ibat"))
+##' 
                      
-Format_mummichog_input <- function(STD_MeasurementsFile = "", 
-                                   OutputPairWise = TRUE){
+Format_mummichog_input <- function(MeasurementsFile_standardized = "", 
+                                   OutputPairWise = TRUE,
+                                   SelectedSample = c("epi","Peri","ibat")){
   
-  prefix <- file_path_sans_ext(STD_MeasurementsFile)
-  mummichog_MeasurementsFile <- read_csv(STD_MeasurementsFile, show_col_types = F) %>% clean_names() %>% 
+  prefix <- file_path_sans_ext(MeasurementsFile_standardized)
+  mummichog_MeasurementsFile <- read_csv(MeasurementsFile_standardized, show_col_types = F) %>% clean_names() %>% 
     mutate(compound = gsub("[a-z]|/","",compound)) %>% 
     separate(compound, c("RT", "MZ"), "_") %>% 
     mutate(Label = paste0(MZ,"__",RT)) %>% 
     relocate(Label, .before = RT) %>% 
-    select(-c(RT:abbrev)) %>%
+    select(-c(RT:minimum_cv_percent)) %>%
     unique()
+  
+  colnames(mummichog_MeasurementsFile) <- c("Label",c("G1_1","G1_2","G1_3","G2_1","G2_2","G2_3",
+                                                      "G3_1","G3_2","G3_3","G4_1","G4_2","G4_3"))
   
   labels <- gsub("_[0-9]+","",colnames(mummichog_MeasurementsFile))
   mummichog_MeasurementsFile <- rbind(labels, mummichog_MeasurementsFile)
   write.csv(file = paste0(prefix,"_mummichogInput.csv"), mummichog_MeasurementsFile, row.names = F)
   
- if(OutputPairWise){
-   groups <- unique(gsub("_[0-9]+","",colnames(mummichog_MeasurementsFile))[-1])
-   if (length(groups) > 1){
-     pairwise <- combn(groups,2)
-     for (i in 1:ncol(pairwise)){
-       x = pairwise[1,i]
-       y = pairwise[2,i]
-       tmp <- mummichog_MeasurementsFile %>% select(Label,starts_with(x),starts_with(y))
-       fileName <- paste0(prefix,"_mummichogInput_",x,"+",y,".csv")
-       write.csv(file = fileName, tmp, row.names = F, quote = F)
-     }
-   }
+  if(OutputPairWise){
+    groups <- unique(gsub("_[0-9]+","",colnames(mummichog_MeasurementsFile))[-1])
+    if (length(groups) > 1){
+      pairwise <- combn(groups,2)
+      for (i in 1:ncol(pairwise)){
+        x = pairwise[1,i]
+        y = pairwise[2,i]
+        tmp <- mummichog_MeasurementsFile %>% select(Label,starts_with(x),starts_with(y))
+        fileName <- paste0(prefix,"_mummichogInput_",x,"+",y,".csv")
+        write.csv(file = fileName, tmp, row.names = F, quote = F)
+      }
+    }
   }
+  
+  if(SelectedSample != ""){
+    tmp <- mummichog_MeasurementsFile %>% select(Label,starts_with(SelectedSample))
+    fileName <- paste0(prefix,"_mummichogInput_",paste0(SelectedSample, collapse = "+"),".csv")
+    write.csv(file = fileName, tmp, row.names = F, quote = F)
+  }
+  
 }
 
 ##' Do mummichog analysis on KEGG/MainClass/SubClass using m/z__rt information
 ##' 
 ##' @param ktablePath A pair-wise sample file output by Format_mummichog_input()
 ##' @param PvalueThreshold Threshold to selected lipids for enrichment analysis
+##' @param Species Specify species for KEGG analysis, support "mmu" and "hsa" now
+##' @param rowNormMet method for column normalization, recommend using NULL for data has internal controls
 ##' @param EnrichType Define enrichment methods, this is multi-optional
 ##' @examples
 ##' 
 ##' mummichog_Functional_analysis(pktablePath = "standardized_Measurements1_Converted_mummichogInput_G1+G3.csv",
-##'                              PvalueThreshold = 0.5, 
-##'                              EnrichType = c("KEGG","MainClass","SubClass")[c(1,2)])
+##'                               PvalueThreshold = 0.5, Species = c("mmu","hsa")[2], rowNormMet = c("SumNorm","NULL")[2],
+##'                               EnrichType = c("KEGG","MainClass","SubClass")[c(1,2)])
 
 mummichog_Functional_analysis <- function(pktablePath = "", 
                                           PvalueThreshold = 0.2, 
+                                          Species = c("mmu","hsa")[2],
+                                          rowNormMet = c("SumNorm","NULL")[2],
                                           EnrichType = c("KEGG","MainClass","SubClass")[c(1,2)]){
 
   prefix <- file_path_sans_ext(pktablePath)
@@ -176,7 +217,7 @@ mummichog_Functional_analysis <- function(pktablePath = "",
   FunAnalysis <- ReplaceMin(FunAnalysis)
   FunAnalysis <- FilterVariable(FunAnalysis, filter = "iqr", qcFilter = "F", rsd = 25)
   FunAnalysis <- PreparePrenormData(FunAnalysis)
-  FunAnalysis <- Normalization(FunAnalysis, rowNorm = "SumNorm", transNorm = "NULL", scaleNorm = "NULL",
+  FunAnalysis <- Normalization(FunAnalysis, rowNorm = rowNormMet, transNorm = "NULL", scaleNorm = "NULL",
                                ratio = FALSE, ratioNum = 20)
   FunAnalysis <- Ttests.Anal(FunAnalysis, nonpar = F, threshp = 0.05, paired = FALSE, 
                              equal.var = T, pvalType = "raw", all_results = T)
@@ -194,7 +235,7 @@ mummichog_Functional_analysis <- function(pktablePath = "",
 
   if ("KEGG" %in% EnrichType){
     #Do KEGG analysis (This need more significant lipid for enrichment)
-    FunAnalysis <- PerformPSEA(FunAnalysis, lib = "mmu_kegg", libVersion = "current", minLib = 3, permNum = 50)
+    FunAnalysis <- PerformPSEA(FunAnalysis, lib = paste0(Species,"_kegg"), libVersion = "current", minLib = 3, permNum = 50)
     FunAnalysis <- PlotPeaks2Paths(FunAnalysis, paste0(prefix,"_peaks_to_KEGG_"), "pdf", dpi = 100, width=NA)
   }
   if ("MainClass" %in% EnrichType){
@@ -220,6 +261,7 @@ mummichog_Functional_analysis <- function(pktablePath = "",
 ##'  @param mummichog_PEpath Path of directory contain mummichog enrichment results
 ##'  @examples
 ##'  Replot_mummichog(mummichog_PEpath = "./")
+##'  
 Replot_mummichog <- function(mummichog_PEpath = ""){
 
   PathwayList <- c()
@@ -264,18 +306,18 @@ Replot_mummichog <- function(mummichog_PEpath = ""){
 }
 
 ##' Refine lipid identification based on given rules
-##' @param STD_MeasurementsFile same as the Output_MeasurementsFile from standardize_by_standards()
+##' @param MeasurementsFile_standardized_matched same as the Output_MeasurementsFile from standardize_by_standards()
 ##' @param RefinePlan Chose schemes to refine lipid identification (Recommend PlanC)
 ##' @examples
 ##' 
-##'Refine_MZ_Identifications(STD_MeasurementsFile = "standardized_Measurements1_Converted.csv",
+##'Refine_MZ_Identifications(MeasurementsFile_standardized_matched = "standardized_Measurements1_Converted.csv",
 ##'                          RefinePlan = c("PlanA","PlanB","PlanC")[3])
 
-Refine_MZ_Identifications <- function(STD_MeasurementsFile = "",
-                                      RefinePlan = c("PlanA","PlanB","PlanC")[3]){
+Refine_MZ_Identifications <- function(MeasurementsFile_standardized_matched = "",
+                                      RefinePlan = c("PlanA","PlanB","PlanC")[c(3)]){
   
-  prefix <- file_path_sans_ext(STD_MeasurementsFile)
-  MF_std <- read_csv(STD_MeasurementsFile, show_col_types = F) %>% clean_names()
+  prefix <- file_path_sans_ext(MeasurementsFile_standardized_matched)
+  MF_std <- read_csv(MeasurementsFile_standardized_matched, show_col_types = F) %>% clean_names()
   
   if ("PlanA" %in% RefinePlan){
     # Refine based on category information
@@ -379,21 +421,29 @@ Refine_MZ_Identifications <- function(STD_MeasurementsFile = "",
   
   if ("PlanC" %in% RefinePlan){
     compoundList <- unique(MF_std$compound)
-    #The most frequent label will be used to represent
     refinedDF <- data.frame(matrix(nrow=0, ncol = length(colnames(MF_std)))) %>% as_tibble()
     colnames(refinedDF) <- colnames(MF_std)
     
     for (i in compoundList){
-      tmp <- filter(MF_std, compound == i)
-      if(nrow(tmp) == 1){
-        refinedDF <- rbind(refinedDF, tmp)
+      CurrentCompound <- filter(MF_std, compound == i)
+      if(nrow(CurrentCompound) == 1){
+        refinedDF <- rbind(refinedDF, CurrentCompound)
       } else {
         # Only keep items with consistent category and main_class, merge abbrev when sub_class are the same
-        if (length(unique(tmp$category)) == 1 & 
-            length(unique(tmp$main_class)) == 1 & 
-            length(unique(tmp$sub_class)) == 1){
-            tmp$abbrev <- paste0(tmp$abbrev,collapse=";")
-            refinedDF <- rbind(refinedDF, tmp[1,])
+        if (length(unique(CurrentCompound$category)) == 1 &  length(unique(CurrentCompound$main_class)) == 1){
+            if(length(unique(CurrentCompound$sub_class)) == 1){
+              CurrentCompound$abbrev <- paste0(unique(CurrentCompound$abbrev),collapse="/")
+              refinedDF <- rbind(refinedDF, CurrentCompound[1,])
+            } else {
+              tbl <- CurrentCompound %>% group_by(abbrev) %>% plyr::count() %>% arrange(desc(freq)) %>%
+                mutate_at(vars(freq), funs(./sum(.)))
+              if(tbl$freq[1] >= 0.8){
+                KeyAbbrev <- tbl[1,]$abbrev
+                CurrentCompound <- filter(CurrentCompound, abbrev == KeyAbbrev) %>% 
+                  mutate(sub_class = paste0(unique(sub_class),collapse = "/"))
+                refinedDF <- rbind(refinedDF, CurrentCompound[1,])
+              }
+            }
         }
       }
     }
@@ -401,114 +451,20 @@ Refine_MZ_Identifications <- function(STD_MeasurementsFile = "",
   }
 }
 
-##' Draw lipid signal on MainClass, SubClass, Abbrev level within each Category
-##' @param DataFile File contain pairwise lipid signals, this should be a subset of the Output_MeasurementsFile from standardize_by_standards()
-##' @param Level Choose the level to plot
-##' @param GroupScheme Define the replicates information
-##' @param PlotSpecific Plot specific term in specific level
-##' @param KeywordSelected All samples should start with this char
-##' @examples
-##' 
-##' HeatMapDraw(DataFile = "Epi_Peri.csv", KeywordSelected = "G",
-##'             PlotSpecific = c("main_class","Ceramides [SP02]"),
-##'             GroupScheme = c(rep(c("Epi", "Peri"),c(3,3))),
-##'             Level = c("abbrev","sub_class","main_class")[2]
-
-HeatMapDraw <- function(DataFile = "",
-                        Level = c("abbrev","sub_class")[2],
-                        GroupScheme = c(rep(c("Epi", "Peri"),c(3,3))),
-                        PlotSpecific = c("main_class","Ceramides [SP02]"),
-                        KeywordSelected = "G"){
-  
-  cat("Processing",DataFile,"...\n")
-  prefix <- file_path_sans_ext(DataFile)
-  MF_STD <- read_csv(DataFile) %>% arrange(category) %>% 
-    filter(rowSums(across(where(is.numeric))) != 0)
-  
-  #Heatmaps of all features
-  MF_STD_count <- MF_STD %>% group_by(category) %>% dplyr::summarise(Count = n())
-  annotation_col = data.frame(Condition = factor(GroupScheme))
-  annotation_row = data.frame(LipidCategory = factor(rep(c("FA", "GL", "GP","PK","PR","SL","SP", "ST"), 
-                                                         as.vector(MF_STD_count$Count))))
-  ann_colors = list(LipidCategory = c(FA = "#66C2A5", GL = "#FC8D62", GP = "#8DA0CB", PK = "#E78AC3",
-                                      PR = "#A6D854",SL ="#E5C494", SP = "#FFD92F", ST = "#B3B3B3")
-  ) 
-  pdf(paste0(prefix,"_All_features_heatmap.pdf"), width = 10, height = 10)
-  p1 <- ComplexHeatmap::pheatmap(MF_STD[,6:11], 
-                                 scale = "row", cluster_rows = T, cluster_cols = T,
-                                 show_rownames = FALSE, show_colnames = T,
-                                 annotation_col = annotation_col, annotation_row = annotation_row,
-                                 annotation_colors = ann_colors,
-                                 annotation_legend = FALSE, annotation_names_col = FALSE,
-                                 annotation_names_row = F,
-                                 row_split = annotation_row$LipidCategory,
-                                 column_split = annotation_col$Condition,
-                                 fontsize = 12)
-  dev.off()
-  
-  #Plot designed pathway
-  pdf(paste0(prefix,"_",paste0(PlotSpecific,collapse = "_"),"_features_heatmap.pdf"), width = 10, height = 10)
-  Forplot <- MF_STD %>% filter(!!as.name(PlotSpecific[1]) == PlotSpecific[2]) %>% as.data.frame()
-  rownames(Forplot) <- make.names(Forplot$abbrev, unique = TRUE)
-  p <- ComplexHeatmap::pheatmap(Forplot[,6:11], scale = "row", cluster_rows = T, cluster_cols = T,
-                                show_rownames = T, show_colnames = T,
-                                annotation_col = annotation_col, annotation_colors = ann_colors, 
-                                annotation_legend = FALSE, annotation_names_col = FALSE,
-                                annotation_names_row = F, column_split = annotation_col$Condition,
-                                fontsize = 12)
-  dev.off()
-  
-  #Heatmaps of category/main_class/sub_class/abbrev levels
-  MF_STD_grouped <- MF_STD %>% group_split(category, .keep = TRUE)
-  names(MF_STD_grouped) <- unique(MF_STD$category)
-  
-  for (i in names(MF_STD_grouped)){
-    cat("Plotting on",Level,"level for(",i,")...\n")
-    heatmap_data <- MF_STD_grouped[[i]] %>% 
-      na.omit() %>% 
-      select_at(vars(Level, starts_with(KeywordSelected))) %>%
-      group_by(!!as.name(Level)) %>% 
-      filter(Level != "-") %>% 
-      mutate_if(is.character,as.numeric) %>% 
-      summarise_all(c("sum")) %>%
-      filter(!!as.name(Level) != "-") %>% 
-      as.data.frame()
-    
-    if (nrow(heatmap_data) > 0){
-      rownames(heatmap_data) <- gsub("\\[.*]/","/",heatmap_data[,Level])
-      rownames(heatmap_data) <- gsub("\\[.*","",rownames(heatmap_data))
-      
-      heatmapdraw_matrix <- heatmap_data %>% select_at(vars(starts_with(KeywordSelected)))
-      write.csv(heatmapdraw_matrix, paste0(prefix,"_",Level,"_",i,"_value.csv"), row.names=TRUE)
-      
-      annotation_col = data.frame(Condition = factor(GroupScheme))
-      pdf(paste0(prefix,"_",Level,"_",i,"_heatmap.pdf"), width = 10, height = 10)
-      p2 <- ComplexHeatmap::pheatmap(heatmapdraw_matrix, 
-                                     cellwidth = 15, cellheight = 15,
-                                     scale = "row", cluster_rows = T, cluster_cols = T,
-                                     show_rownames = TRUE, show_colnames = T,
-                                     annotation_col = annotation_col,
-                                     annotation_legend = FALSE, annotation_names_col = FALSE,
-                                     column_split = annotation_col$Condition,
-                                     legend = TRUE, fontsize = 12)
-      dev.off()
-    }
-  }
-}
-
 ##' Draw costume Volcano Plot using ggplot
 ##' @param PlotFile The file returned by Volcano.Anal()
 ##' @param ThresholdFC Threshold for fold-change
 ##' @param ThresholdSig Threshold for significance
+##' @param TopUpDownShown Slected top up,down significant features for shown
 ##' @examples
 ##' 
 ##' volcano_plotting(PlotFile = "refinedDF_5depots_abbrev_adi_epi+adi_ibat_volcano.csv",
-##'                  ThresholdFC = 1.5, ThresholdSig = 0.05)
+##'                  ThresholdFC = 1.5, ThresholdSig = 0.05, TopUpDownShown = c(10,10))
 ##'                  
 volcano_plotting <- function(PlotFile = "",
                              ThresholdFC = 1.5,
-                             ThresholdSig = 0.05){
-  
+                             ThresholdSig = 0.05,
+                             TopUpDownShown = c(10,10)){
   volcano_pk <- read_csv(PlotFile, show_col_types = FALSE) %>% 
     clean_names() %>% 
     transform(Group=NA) %>%
@@ -520,9 +476,16 @@ volcano_plotting <- function(PlotFile = "",
   volcano_pk <- volcano_pk %>% 
     transform(Group=case_when(Group == "Sig.Up" ~ paste0("Sig.Up [",ifelse(is.na(tbl["Sig.Up"]),0,tbl[["Sig.Up"]]),"]"),
                               Group == "Sig.Down" ~ paste0("Sig.Down [",ifelse(is.na(tbl["Sig.Down"]),0,tbl[["Sig.Down"]]),"]"),
-                              Group == "Nonsig." ~ paste0("Nonsig. [",ifelse(is.na(tbl["Nonsig."]),0,tbl[["Nonsig."]]),"]")),
-              Label=case_when(Group == "Sig.Up" | Group == "Sig.Down" ~ x1,
-                              Group == "Nonsig." ~ ""))
+                              Group == "Nonsig." ~ paste0("Nonsig. [",ifelse(is.na(tbl["Nonsig."]),0,tbl[["Nonsig."]]),"]")))
+  
+  volcano_pk$Label <- ""
+  UpShownNum <- ifelse(tbl[["Sig.Up"]] < TopUpDownShown[1], tbl[["Sig.Up"]], TopUpDownShown[1])
+  UpShownItem <- volcano_pk %>% arrange(desc(log10_p)) %>% filter(str_detect(Group, "Sig.Up")) %>% slice(1:UpShownNum)
+  volcano_pk$Label[volcano_pk$x1 %in% UpShownItem$x1] <- UpShownItem$x1
+  
+  DownShownNum <- ifelse(tbl[["Sig.Down"]] < TopUpDownShown[2], tbl[["Sig.Down"]], TopUpDownShown[2])
+  DownShownItem <- volcano_pk %>% arrange(desc(log10_p)) %>% filter(str_detect(Group, "Sig.Down")) %>% slice(1:DownShownNum)
+  volcano_pk$Label[volcano_pk$x1 %in% DownShownItem$x1] <- DownShownItem$x1
   
   prefix <- file_path_sans_ext(PlotFile)
   pdf(paste0(prefix,"_volcanoPlot_Custome_FC",ThresholdFC,"_Sig",ThresholdSig,".pdf"), height = 8, width = 12)
@@ -548,28 +511,33 @@ volcano_plotting <- function(PlotFile = "",
 ##' Draw costume scatter plot for pair-wise T.test or multi-group anova result
 ##' @param PlotFile The file returned by Volcano.Anal()
 ##' @param ThresholdSig Threshold for significance
+##' @param SigIndex select using raw p-value (p_value) or adjusted p-value (fdr)
+##' @param TopShown Top significant items for labeling
 ##' @examples
 ##' 
 ##' T_Anavo_plotting(PlotFile = "refinedDF_5depots_abbrev_anova_posthoc.csv",
-##'                  ThresholdSig = 0.005)
+##'                  SigIndex = c("p_value","fdr")[1],ThresholdSig = 0.005,TopShown = 10)
 ##'                  
 T_Anavo_plotting <- function(PlotFile = "",
-                             ThresholdSig = 0.005){
-  
+                             SigIndex = c("p_value","fdr")[1],
+                             ThresholdSig = 0.005,
+                             TopShown = 10){
   prefix <- file_path_sans_ext(PlotFile)
-  T_Anavo_pk <- read_csv(PlotFile, show_col_types = FALSE) %>% 
-    clean_names() %>% 
-    transform(Group=case_when(p_value < ThresholdSig ~ "Significant",
-                              p_value >= ThresholdSig  ~ "Nonsignificant"))
   
-  tbl <- table(T_Anavo_pk$Group) 
+  T_Anavo_pk <- read_csv(PlotFile, show_col_types = FALSE) %>% clean_names() %>%
+    transform(Group=case_when(eval(parse(text = SigIndex)) < ThresholdSig ~ "Significant",
+                              eval(parse(text = SigIndex)) >= ThresholdSig  ~ "Nonsignificant"))
   
+  tbl <- table(T_Anavo_pk$Group)
   T_Anavo_pk <- T_Anavo_pk %>% 
     transform(Group=case_when(Group == "Significant" ~ paste0("Significant [",ifelse(is.na(tbl["Significant"]),0,tbl[["Significant"]]),"]"),
-                              Group == "Nonsignificant" ~ paste0("Nonsignificant [",ifelse(is.na(tbl["Nonsignificant"]),0,tbl[["Nonsignificant"]]),"]")),
-              Label=case_when(Group == "Significant" ~ x1,
-                              Group == "Nonsignificant" ~ "")) %>%
-    arrange(log10_p)
+                              Group == "Nonsignificant" ~ paste0("Nonsignificant [",ifelse(is.na(tbl["Nonsignificant"]),0,tbl[["Nonsignificant"]]),"]"))) %>%
+    arrange(eval(parse(text = SigIndex)))
+  
+  T_Anavo_pk$Label <- ""
+  TopShownNum <- ifelse(tbl[["Significant"]] < TopShown, tbl[["Significant"]], TopShown)
+  TopShownItem <- T_Anavo_pk %>% filter(str_detect(Group, "Significant")) %>% slice(1:TopShownNum)
+  T_Anavo_pk$Label[T_Anavo_pk$x1 %in% TopShownItem$x1] <- TopShownItem$x1
   
   # T_Anavo_pk$x1 <- factor(T_Anavo_pk$x1, levels = T_Anavo_pk$x1)
   
@@ -597,11 +565,14 @@ T_Anavo_plotting <- function(PlotFile = "",
 
 ##' Run MetaboAnalystR codes
 ##' @param pktablePath A standard MetaboAnalystR input file
+##' @param rowNormMet method for column normalization, recommend using NULL for data has internal controls
 ##' @examples
 ##' 
-##' RunMetaboAnalystR(pktablePath = "refinedDF_5depots_abbrev_adi_peri+adi_ibat.csv")
+##' RunMetaboAnalystR(pktablePath = "refinedDF_5depots_abbrev_adi_peri+adi_ibat.csv",
+##' rowNormMet = c("SumNorm","NULL")[1])
 ##' 
-RunMetaboAnalystR <- function(pktablePath = ""){
+RunMetaboAnalystR <- function(pktablePath = "",
+                              rowNormMet = c("SumNorm","NULL")[1]){
 
   prefix <- file_path_sans_ext(pktablePath)
   # Step1. create the mSet Object, specifying that the data to be uploaded
@@ -617,7 +588,7 @@ RunMetaboAnalystR <- function(pktablePath = ""){
   mSet <- SanityCheckData(mSetObj = mSet)
   mSet <- FilterVariable(mSetObj = mSet, filter = "none", qcFilter = "F", rsd = 20)
   mSet <- PreparePrenormData(mSetObj = mSet)
-  mSet <- Normalization(mSetObj = mSet, rowNorm = "SumNorm", transNorm = "NULL", scaleNorm = "NULL", ratio=FALSE, ratioNum=20)
+  mSet <- Normalization(mSetObj = mSet, rowNorm = rowNormMet, transNorm = "NULL", scaleNorm = "NULL", ratio=FALSE, ratioNum=20)
   mSet <- PlotNormSummary(mSetObj = mSet, imgName = paste0(prefix,"_NormFeature_"), format="pdf", dpi = 100, width=NA)
   mSet <- PlotSampleNormSummary(mSetObj = mSet, imgName=paste0(prefix,"_NormSample_"), format="pdf", dpi = 100, width=NA)
   
@@ -690,26 +661,27 @@ RunMetaboAnalystR <- function(pktablePath = ""){
 }
 
 ##' Unify the Lipid signal at each level and return all/pairwise samples
-##' @param STD_MeasurementsFile same as the Output_MeasurementsFile from standardize_by_standards()
+##' @param Refined_MeasurementsFile Refined lipid signal file output from Refine_MZ_Identifications()
 ##' @param OutputPairWise Besides output all samples, indicate whether output pairwise samples
 ##' @param KeywordSelected All samples should start with this char
 ##' @param run_RunMetaboAnalystR Whether run MetaboAnalystR analysis in the meanwhile 
 ##' @examples
 ##' 
-##' Analyze_Lipids(STD_MeasurementsFile = "refinedDF_5depots.csv",
+##' Analyze_Lipids(MeasurementsFile_standardized_matched_refined = "refinedDF_5depots.csv",
 ##'                OutputPairWise = T,
-##'                KeywordSelected="adi",
+##'                KeywordSelected = "adi",
 ##'                run_RunMetaboAnalystR = T)
             
-Analyze_Lipids <- function(STD_MeasurementsFile = "refinedDF_5depots.csv",
-                          OutputPairWise = T,
-                          KeywordSelected="adi",
-                          run_RunMetaboAnalystR = T){
-  LipidLevels <- c("category","main_class","sub_class","abbrev")
-  prefix <- file_path_sans_ext(STD_MeasurementsFile)
+Analyze_Lipids <- function(MeasurementsFile_standardized_matched_refined = "",
+                           OutputPairWise = T,
+                           KeywordSelected = "adi",
+                           run_RunMetaboAnalystR = T){
+  
+  LipidLevels <- c("compound","category","main_class","sub_class","abbrev")
+  prefix <- file_path_sans_ext(MeasurementsFile_standardized_matched_refined)
   
   for (level in LipidLevels){
-    slectedrefinedDF <- read_csv(STD_MeasurementsFile, show_col_types = FALSE) %>% 
+    slectedrefinedDF <- read_csv(MeasurementsFile_standardized_matched_refined, show_col_types = FALSE) %>% 
       select_at(vars(level, starts_with(KeywordSelected))) %>%
       group_by(!!as.name(level)) %>% 
       summarise_all(c("sum")) %>% 
@@ -721,7 +693,7 @@ Analyze_Lipids <- function(STD_MeasurementsFile = "refinedDF_5depots.csv",
     fileName <- paste0(prefix,"_",level,".csv")
     cat("Processing",fileName,"...\n")
     write.csv(file = fileName, slectedrefinedDF, row.names = F)
-    if(run_RunMetaboAnalystR){RunMetaboAnalystR(pktablePath = fileName)}
+    if(run_RunMetaboAnalystR){RunMetaboAnalystR(pktablePath = fileName, rowNormMet = "SumNorm")}
     
     if(OutputPairWise){
       groups <- unique(gsub("_[0-9]+","",colnames(slectedrefinedDF))[-1])
@@ -735,35 +707,194 @@ Analyze_Lipids <- function(STD_MeasurementsFile = "refinedDF_5depots.csv",
           fileName <- paste0(prefix,"_",level,"_",x,"+",y,".csv")
           cat("Processing",fileName,"...\n")
           write.csv(file = fileName, tmp, row.names = F)
-          if(run_RunMetaboAnalystR){RunMetaboAnalystR(pktablePath = fileName)}
+          if(run_RunMetaboAnalystR){RunMetaboAnalystR(pktablePath = fileName, rowNormMet = "SumNorm")}
         }
       }
     }
   }
 }
 
-Analyze_Lipids(STD_MeasurementsFile = "refinedDF_5depots.csv",
-               OutputPairWise = T,
-               KeywordSelected="adi",
-               run_RunMetaboAnalystR = T)
+##' Draw lipid signal on MainClass, SubClass, Abbrev level within each Category
+##' @param MeasurementsFile_standardized_matched_refined File contain pairwise lipid signals, this can be a subset of the Refine_MZ_Identifications()
+##' @param Level Choose the level to plot
+##' @param GroupScheme Define the replicates information
+##' @param PlotSpecific Plot specific term in specific level
+##' @param KeywordSelected All samples should start with this char
+##' @examples
+##' 
+##' HeatMapDraw(MeasurementsFile_standardized_matched_refined = "Epi_Peri.csv", KeywordSelected = "G",
+##'             PlotSpecific = c("main_class","Ceramides [SP02]"),
+##'             GroupScheme = c(rep(c("Epi", "Peri"),c(3,3))),
+##'             Level = c("abbrev","sub_class","main_class")[2]
+
+HeatMapDraw <- function(MeasurementsFile_standardized_matched_refined = "",
+                        Level = c("main_class","sub_class","abbrev")[2],
+                        GroupScheme = c(rep(c("Epi", "Peri"),c(3,3))),
+                        PlotSpecific = c("main_class","Ceramides [SP02]"),
+                        KeywordSelected = "adi"){
+  
+  cat("Processing",Refined_MeasurementsFile,"...\n")
+  prefix <- file_path_sans_ext(Refined_MeasurementsFile)
+  MF_STD <- read_csv(Refined_MeasurementsFile) %>% arrange(category) %>% 
+    filter(rowSums(across(where(is.numeric))) != 0)
+  
+  #Heatmaps of all features
+  MF_STD_count <- MF_STD %>% group_by(category) %>% dplyr::summarise(Count = n())
+  annotation_col = data.frame(Condition = factor(GroupScheme))
+  ExistCategory <- gsub(".*\\[|\\]","",unique(MF_STD$category))
+  annotation_row = data.frame(LipidCategory = factor(rep(ExistCategory, as.vector(MF_STD_count$Count))))
+  ann_colors = list(Condition = structure(c("#6A3D9A","#B15928"), names = as.vector(unique(annotation_col$Condition))),
+                    LipidCategory = structure(brewer.pal(length(ExistCategory), "Paired"), names = ExistCategory))
+  
+  Forplot <- MF_STD %>% select_at(vars(starts_with(KeywordSelected)))
+  pdf(paste0(prefix,"_All_features_heatmap.pdf"), width = 10, height = 10)
+  p1 <- ComplexHeatmap::pheatmap(Forplot, 
+                                 scale = "row", cluster_rows = T, cluster_cols = T,
+                                 show_rownames = F, show_colnames = T,
+                                 annotation_col = annotation_col, annotation_row = annotation_row,
+                                 annotation_colors = ann_colors,
+                                 annotation_legend = F, annotation_names_col = F,
+                                 annotation_names_row = F,
+                                 row_split = annotation_row$LipidCategory,
+                                 column_split = annotation_col$Condition,
+                                 fontsize = 12)
+  dev.off()
+  
+  #Plot designed pathway
+  Forplot <- MF_STD %>% filter(!!as.name(PlotSpecific[1]) == PlotSpecific[2]) %>% 
+    select_at(vars(starts_with(KeywordSelected))) %>% as.data.frame()
+  rownames(Forplot) <- make.names(Forplot$abbrev, unique = TRUE)
+  
+  pdf(paste0(prefix,"_",paste0(PlotSpecific,collapse = "_"),"_features_heatmap.pdf"), width = 10, height = 10)
+  p <- ComplexHeatmap::pheatmap(Forplot, scale = "row", cluster_rows = T, cluster_cols = T,
+                                show_rownames = T, show_colnames = T,
+                                annotation_col = annotation_col, annotation_colors = ann_colors, 
+                                annotation_legend = FALSE, annotation_names_col = FALSE,
+                                annotation_names_row = F, column_split = annotation_col$Condition,
+                                fontsize = 12)
+  dev.off()
+  
+  #Heatmaps of category/main_class/sub_class/abbrev levels
+  MF_STD_grouped <- MF_STD %>% group_split(category, .keep = TRUE)
+  names(MF_STD_grouped) <- unique(MF_STD$category)
+  
+  for (i in names(MF_STD_grouped)){
+    cat("Plotting on",Level,"level for(",i,")...\n")
+    heatmap_data <- MF_STD_grouped[[i]] %>% 
+      na.omit() %>% 
+      select_at(vars(Level, starts_with(KeywordSelected))) %>%
+      group_by(!!as.name(Level)) %>% 
+      mutate_if(is.character,as.numeric) %>% 
+      summarise_all(c("sum")) %>%
+      filter(!!as.name(Level) != "-") %>% 
+      as.data.frame()
+    
+    if (nrow(heatmap_data) > 0){
+      rownames(heatmap_data) <- gsub("\\[.*]/","/",heatmap_data[,Level])
+      rownames(heatmap_data) <- gsub("\\[.*","",rownames(heatmap_data))
+      
+      heatmapdraw_matrix <- heatmap_data %>% select_at(vars(starts_with(KeywordSelected)))
+      write.csv(heatmapdraw_matrix, paste0(prefix,"_",Level,"_",i,"_value.csv"), row.names=TRUE)
+      
+      annotation_col = data.frame(Condition = factor(GroupScheme))
+      pdf(paste0(prefix,"_",Level,"_",i,"_heatmap.pdf"), width = 10, height = 10)
+      p2 <- ComplexHeatmap::pheatmap(heatmapdraw_matrix, 
+                                     cellwidth = 15, cellheight = 15,
+                                     scale = "row", cluster_rows = T, cluster_cols = T,
+                                     show_rownames = TRUE, show_colnames = T,
+                                     annotation_col = annotation_col,
+                                     annotation_legend = FALSE, annotation_names_col = FALSE,
+                                     column_split = annotation_col$Condition,
+                                     legend = TRUE, fontsize = 12)
+      dev.off()
+    }
+  }
+}
+
+#=========================================================================================
+
+RelativeDiffPlot <- function(MeasurementsFile_standardized_matched_refined = "refinedDF_5depots.csv",
+                             OutputPairWise = T,
+                             SelectedSample = c("adi_epi","adi_peri")){
+  
+  LipidLevels <- c("main_class","sub_class","abbrev")
+  prefix <- file_path_sans_ext(MeasurementsFile_standardized_matched_refined)
+  
+  for (level in LipidLevels){
+    # slectedrefinedDF <- 
+      read_csv(MeasurementsFile_standardized_matched_refined, show_col_types = FALSE) %>% 
+      select_at(vars(category, level, starts_with(SelectedSample))) %>%
+      mutate(MergedLevel = paste0(category,"__",!!as.name(level))) %>%
+      relocate(MergedLevel, .before = category) %>%
+      group_by(MergedLevel) %>% 
+      select(-c(category,level)) %>%
+      summarise_all(c("sum")) %>% 
+      separate(MergedLevel, c("category", level), "__") %>%
+      mutate_at(vars(starts_with(SelectedSample)), funs(./sum(.))) %>%
+      rowwise() %>%
+      mutate(TreatMean = mean())
+    
+    # Relative Difference = (experimental - control)/control *100%
+
+  }
+  
+  if(SelectedSample != ""){
+    tmp <- mummichog_MeasurementsFile %>% select(Label,starts_with(SelectedSample))
+    fileName <- paste0(prefix,"_mummichogInput_",paste0(SelectedSample, collapse = "+"),".csv")
+    write.csv(file = fileName, tmp, row.names = F, quote = F)
+  }
+  
+
+  # lipid_cert_exp1_ma <- read_csv("lipid_cert_exp1_ma.csv")
+  # certmaexp1_pvalue_distinct <- read_csv("certmaexp1_pvalue_distinct.csv")
+  # 
+  # # data_bubble <- lipid_cert_exp1_ma %>% 
+  # #   select(compound, ma_ce_ibat_1, ma_ce_ibat_2, ma_ce_ibat_3, ma_rt_ibat_1, ma_rt_ibat_2, ma_rt_ibat_3) %>% 
+  # #   right_join(certmaexp1_pvalue_distinct, by = "compound")
+  # # 
+  # # write.csv(data_bubble, file = "data_bubble.csv")
+  
+  # Y_axis stands for relative percentage difference in abundance of all lipid species between cold-treated and control mice. 
+  # Each dot represents a lipid species.
+  # The dot size indicates significance.
+  # The different lipid categories are color-coded.
+  bubble <- read_csv("cert_ma_exp1_bubble.csv")
+  ggplot(bubble, aes(x=relative_difference, y=category)) +
+    # labs(title="The relative percentage difference in detected lipid species between cold-treated and control mice") +
+    # theme(axis.title.x=element_text(vjust=1, size=20)) +
+    xlab("Relative Difference (%)") +
+    ylab("Lipid Category") +
+    # theme(axis.title.x=element_text(margin=margin(t=10, r=10, b=10, l=10))) +
+    # scale_size_area(breaks=c(0.25, 0.50, 0.75)) +
+    scale_fill_manual(breaks=c(0.75,0.50,0.25)) +
+    geom_point(aes(size=p_value, color=category), alpha=0.6) +
+    scale_color_brewer(palette = "Accent") +
+    theme_test() +
+    scale_size(name="P_value")
+}
 
 #=========================================================================================
 # Run example
 #=========================================================================================
-standardize_by_standards(MeasurementsFile = "test1.csv", 
+standardize_by_standards(MeasurementsFile = "test1.csv",
                          ISMeasurementsFile = "IS-Measurements-1.xls",
-                         IdentificationFile = "Identifications-1.csv",
-                         LipidMAPSDB = "lipid_database.csv",
-                         Output_MeasurementsFile = "standardized_test1_Converted_zhy.csv",
+                         MeasurementsFile_standardized = "test1_standardized.csv",
                          GroupLabel = list(c(1),c(2:4),c(5:7),c(8:10),c(11:13),c(14:16),
-                                                c(17:19),c(20:22),c(23:25),c(26:28),c(29:31),c(32:34),
-                                                c(35:37),c(38:42),c(43:47),c(48:50),c(51:53)))
+                                               c(17:19),c(20:22),c(23:25),c(26:28),c(29:31),c(32:34),
+                                               c(35:37),c(38:42),c(43:47),c(48:50),c(51:53)))
 
-Format_mummichog_input(STD_MeasurementsFile = "standardized_Measurements1_Converted.csv", 
-                       OutputPairWise = T)
+MatchLipidMAPS(MeasurementsFile_standardized = "test1_standardized.csv",
+               IdentificationFile = "Identifications-1.csv",
+               LipidMAPSDB = "lipid_database.csv",
+               OutUnmatchedLipids = T,
+               MeasurementsFile_standardized_matched = "test1_standardized_matched.csv"
+)
+
+Format_mummichog_input(MeasurementsFile_standardized = "standardized_Measurements1_Converted.csv",
+                       OutputPairWise = T, SelectedSample = c("epi","Peri","ibat"))
 
 mummichog_Functional_analysis(pktablePath = "standardized_Measurements1_Converted_mummichogInput_G1+G3.csv",
-                              PvalueThreshold = 0.5, 
+                              PvalueThreshold = 0.5, Species = c("mmu","hsa")[2], rowNormMet = c("SumNorm","NULL")[2],
                               EnrichType = c("KEGG","MainClass","SubClass")[c(1,2)])
 
 Replot_mummichog(mummichog_PEpath = "./")
@@ -771,7 +902,13 @@ Replot_mummichog(mummichog_PEpath = "./")
 Refine_MZ_Identifications(STD_MeasurementsFile = "standardized_Measurements1_Converted.csv",
                           RefinePlan = c("PlanA","PlanB","PlanC")[3])
 
-HeatMapDraw(DataFile = "Epi_Peri.csv", 
+volcano_plotting(PlotFile = "refinedDF_5depots_abbrev_adi_epi+adi_ibat_volcano.csv",
+                 ThresholdFC = 1.5, ThresholdSig = 0.05, TopUpDownShown = c(10,10))
+
+T_Anavo_plotting(PlotFile = "refinedDF_5depots_abbrev_anova_posthoc.csv",
+                 SigIndex = c("p_value","fdr")[1],ThresholdSig = 0.005,TopShown = 10)
+
+HeatMapDraw(DataFile = "Epi_Peri.csv",
             KeywordSelected = "G",
             PlotSpecific = c("main_class","Ceramides [SP02]"),
             GroupScheme = c(rep(c("Epi", "Peri"),c(3,3))),
