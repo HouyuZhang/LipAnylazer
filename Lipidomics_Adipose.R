@@ -48,3 +48,27 @@ Analyze_Lipids(MeasurementsFile_standardized_matched_refined = "Lipidomics_5depo
 
 
 
+setwd("../From_Detain/")
+source("../210923_Lipidomics/LipidomicsAnlysis.R")
+MatchLipidMAPS(MeasurementsFile_standardized = "standardized_Measurements_RT_TN.csv", 
+               LipidMAPSDB = "../210923_Lipidomics/lipid_database.csv",
+               IdentificationFile = "CompoundIdentifications.csv", 
+               OutUnmatchedLipids = T,
+               MeasurementsFile_standardized_matched = "standardized_Measurements_RT_TN_matched.csv"
+)
+
+Format_mummichog_input(MeasurementsFile_standardized = "standardized_Measurements_RT_TN.csv", 
+                       OutputPairWise = T, SelectedSample = "")
+
+mummichog_Functional_analysis(pktablePath = "standardized_Measurements_RT_TN_mummichogInput_tn_renal_ma+rt_renal_ma.csv", 
+                              PvalueThreshold = 0.5, Species = "mmu", rowNormMet = "NULL", EnrichType = "KEGG",
+                              SamplesDel = "rt_renal_ma_3")
+
+Refine_MZ_Identifications(MeasurementsFile_standardized_matched = "standardized_Measurements_RT_TN_matched.csv",
+                          RefinePlan = "PlanC")
+
+Analyze_Lipids(MeasurementsFile_standardized_matched_refined = "standardized_Measurements_RT_TN_matched_refined_PlanC.csv",
+               OutputPairWise = T, KeywordSelected = "rt", run_RunMetaboAnalystR = T)
+
+
+

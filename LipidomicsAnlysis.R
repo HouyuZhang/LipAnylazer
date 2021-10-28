@@ -1,12 +1,12 @@
 #=========================================================================================
 # This script contain main functions used for lipidomics analysis
 
-# Version 1.3 created by Houyu Zhang on 2021/10/27
+# Version 1.4 created by Houyu Zhang on 2021/10/27
 # Issue report on Hughiez047@gmail.com
 # Copyright (c) 2021 __CarlosLab@PKU__. All rights reserved.
 #=========================================================================================
 
-setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
+# setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
 suppressPackageStartupMessages(library(tidyverse))
 suppressPackageStartupMessages(library(readxl))
 suppressPackageStartupMessages(library(janitor))
@@ -124,7 +124,7 @@ MatchLipidMAPS <- function(MeasurementsFile_standardized = "",
   
   if(OutUnmatchedLipids){
     prefix <- file_path_sans_ext(MeasurementsFile_standardized)
-    UM <- MF_standardized %>% filter(identifications == 0) %>% select(-c(neutral_mass_da:minimum_cv_percent))
+    UM <- MF_standardized %>% filter(identifications == 0) %>% select(-c(neutral_mass_da:minimum_cv))
     write.csv(x = UM, file = paste0(prefix,"_unmatched.csv"), row.names = F)
   }
 
@@ -134,13 +134,12 @@ MatchLipidMAPS <- function(MeasurementsFile_standardized = "",
     select(compound, category, main_class, sub_class, abbrev) %>% 
     right_join(MF_standardized, by="compound") %>% 
     filter(category != "NA") %>%
-    select(-c(neutral_mass_da:minimum_cv_percent)) %>% 
+    select(-c(neutral_mass_da:minimum_cv)) %>% 
     arrange(compound) 
   
   write.csv(MF_standardized_matched, MeasurementsFile_standardized_matched, row.names = F)
   cat("Finished matching LipidMAPS database!\n")
 }
-
 
 ##' Convert Standard (STD) Lipid signal file to mummichog accepted format (m/z__rt)
 ##' 
@@ -155,8 +154,7 @@ MatchLipidMAPS <- function(MeasurementsFile_standardized = "",
                      
 Format_mummichog_input <- function(MeasurementsFile_standardized = "", 
                                    OutputPairWise = TRUE,
-                                   SelectedSample = "",
-                                   run_mummichog_Functional_analysis = T){
+                                   SelectedSample = ""){
   
   prefix <- file_path_sans_ext(MeasurementsFile_standardized)
   mummichog_MeasurementsFile <- read_csv(MeasurementsFile_standardized, show_col_types = F) %>% clean_names() %>% 
@@ -164,7 +162,7 @@ Format_mummichog_input <- function(MeasurementsFile_standardized = "",
     separate(compound, c("RT", "MZ"), "_") %>% 
     mutate(Label = paste0(MZ,"__",RT)) %>% 
     relocate(Label, .before = RT) %>% 
-    select(-c(RT:minimum_cv_percent)) %>%
+    select(-c(RT:minimum_cv)) %>%
     unique()
   
   # colnames(mummichog_MeasurementsFile) <- c("Label",c("G1_1","G1_2","G1_3","G2_1","G2_2","G2_3",
@@ -173,11 +171,6 @@ Format_mummichog_input <- function(MeasurementsFile_standardized = "",
   labels <- gsub("_[0-9]+","",colnames(mummichog_MeasurementsFile))
   mummichog_MeasurementsFile <- rbind(labels, mummichog_MeasurementsFile)
   write.csv(file = paste0(prefix,"_mummichogInput.csv"), mummichog_MeasurementsFile, row.names = F)
-  
-  if(run_mummichog_Functional_analysis){
-    mummichog_Functional_analysis(pktablePath = paste0(prefix,"_mummichogInput.csv"), PvalueThreshold = 0.05, Species = "mmu", 
-                                  rowNormMet = "SumNorm",EnrichType = c("KEGG","MainClass"))
-  }
   
   if(OutputPairWise){
     groups <- unique(gsub("_[0-9]+","",colnames(mummichog_MeasurementsFile))[-1])
@@ -189,11 +182,6 @@ Format_mummichog_input <- function(MeasurementsFile_standardized = "",
         tmp <- mummichog_MeasurementsFile %>% select(Label, starts_with(x), starts_with(y))
         fileName <- paste0(prefix,"_mummichogInput_",x,"+",y,".csv")
         write.csv(file = fileName, tmp, row.names = F, quote = F)
-        
-        if(run_mummichog_Functional_analysis){
-          mummichog_Functional_analysis(pktablePath = fileName, PvalueThreshold = 0.4, Species = "mmu", 
-                                        rowNormMet = "SumNorm",EnrichType = c("KEGG","MainClass"))
-        }
       }
     }
   }
@@ -202,10 +190,6 @@ Format_mummichog_input <- function(MeasurementsFile_standardized = "",
     tmp <- mummichog_MeasurementsFile %>% select(Label,starts_with(SelectedSample))
     fileName <- paste0(prefix,"_mummichogInput_",paste0(SelectedSample, collapse = "+"),".csv")
     write.csv(file = fileName, tmp, row.names = F, quote = F)
-    if(run_mummichog_Functional_analysis){
-      mummichog_Functional_analysis(pktablePath = fileName, PvalueThreshold = 0.4, Species = "mmu", 
-                                    rowNormMet = "SumNorm",EnrichType = c("KEGG","MainClass"))
-    }
   }
   cat("Finished converting compound to mummichog supported format!\n")
 }
@@ -217,6 +201,7 @@ Format_mummichog_input <- function(MeasurementsFile_standardized = "",
 ##' @param Species Specify species for KEGG analysis, support "mmu" and "hsa" now
 ##' @param rowNormMet method for column normalization, recommend using NULL for data has internal controls
 ##' @param EnrichType Define enrichment methods, this is multi-optional
+##' @param SamplesDel samples to delete, these samples might be sudo-samples for MetaboAnalyst checking
 ##' @examples
 ##' 
 ##' mummichog_Functional_analysis(pktablePath = "standardized_Measurements1_Converted_mummichogInput_G1+G3.csv",
@@ -227,7 +212,8 @@ mummichog_Functional_analysis <- function(pktablePath = "",
                                           PvalueThreshold = 0.2, 
                                           Species = c("mmu","hsa")[2],
                                           rowNormMet = c("SumNorm","NULL")[2],
-                                          EnrichType = c("KEGG","MainClass","SubClass")[c(1,2)]){
+                                          EnrichType = c("KEGG","MainClass","SubClass")[c(1,2)],
+                                          SamplesDel = ""){
 
   prefix <- file_path_sans_ext(pktablePath)
   
@@ -236,13 +222,21 @@ mummichog_Functional_analysis <- function(pktablePath = "",
   FunAnalysis <- SanityCheckData(FunAnalysis)
   FunAnalysis <- ReplaceMin(FunAnalysis)
   FunAnalysis <- FilterVariable(FunAnalysis, filter = "iqr", qcFilter = "F", rsd = 25)
+  
+  if(SamplesDel != ""){
+    FunAnalysis <- GetGroupNames(FunAnalysis, "")
+    feature.nm.vec <- c("")
+    smpl.nm.vec <- SamplesDel
+    grp.nm.vec <- c("")
+    FunAnalysis <- UpdateData(FunAnalysis)
+  }
+  
   FunAnalysis <- PreparePrenormData(FunAnalysis)
   FunAnalysis <- Normalization(FunAnalysis, rowNorm = rowNormMet, transNorm = "NULL", scaleNorm = "NULL",
                                ratio = FALSE, ratioNum = 20)
   FunAnalysis <- Ttests.Anal(FunAnalysis, nonpar = F, threshp = 0.05, paired = FALSE, 
                              equal.var = T, pvalType = "raw", all_results = T)
   FunAnalysis <- Convert2Mummichog(FunAnalysis, rt = T) # mummichog_input: m.z, r.tm p.value, t.score
-    
   FunAnalysis <- InitDataObjects("mass_table", anal.type = "mummichog", paired = FALSE)
   FunAnalysis <- SetPeakFormat(FunAnalysis, type = "mprt")
   # Ion Mode: Negative Mode; Mass Tolerance (ppm): 5.0
