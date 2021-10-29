@@ -1,6 +1,6 @@
 #=========================================================================================
 # This script contain main functions used for lipidomics analysis
-
+# 
 # Version 1.4.1 created by Houyu Zhang on 2021/10/28
 # Issue report on Hughiez047@gmail.com
 # Copyright (c) 2021 __CarlosLab@PKU__. All rights reserved.
@@ -222,14 +222,12 @@ mummichog_Functional_analysis <- function(pktablePath = "",
   FunAnalysis <- SanityCheckData(FunAnalysis)
   FunAnalysis <- ReplaceMin(FunAnalysis)
   FunAnalysis <- FilterVariable(FunAnalysis, filter = "iqr", qcFilter = "F", rsd = 25)
-  
-  if(SamplesDel != ""){
-    FunAnalysis <- GetGroupNames(FunAnalysis, "")
-    feature.nm.vec <- c("")
-    smpl.nm.vec <- SamplesDel
-    grp.nm.vec <- c("")
-    FunAnalysis <- UpdateData(FunAnalysis)
-  }
+
+  FunAnalysis <- GetGroupNames(FunAnalysis, "")
+  feature.nm.vec <- c("")
+  smpl.nm.vec <- SamplesDel
+  grp.nm.vec <- c("")
+  FunAnalysis <- UpdateData(FunAnalysis)
   
   FunAnalysis <- PreparePrenormData(FunAnalysis)
   FunAnalysis <- Normalization(FunAnalysis, rowNorm = rowNormMet, transNorm = "NULL", scaleNorm = "NULL",
@@ -613,6 +611,13 @@ RunMetaboAnalystR <- function(pktablePath = "",
   mSet <- ReplaceMin(mSetObj = mSet)
   mSet <- SanityCheckData(mSetObj = mSet)
   mSet <- FilterVariable(mSetObj = mSet, filter = "none", qcFilter = "F", rsd = 20)
+  
+  FunAnalysis <- GetGroupNames(FunAnalysis, "")
+  feature.nm.vec <- c("")
+  smpl.nm.vec <- SamplesDel
+  grp.nm.vec <- c("")
+  FunAnalysis <- UpdateData(FunAnalysis)
+  
   mSet <- PreparePrenormData(mSetObj = mSet)
   mSet <- Normalization(mSetObj = mSet, rowNorm = rowNormMet, transNorm = "NULL", scaleNorm = "NULL", ratio=FALSE, ratioNum=20)
   mSet <- PlotNormSummary(mSetObj = mSet, imgName = paste0(prefix,"_NormFeature_"), format="pdf", dpi = 100, width=NA)
@@ -756,7 +761,7 @@ Analyze_Lipids <- function(MeasurementsFile_standardized_matched_refined = "",
 HeatMapDraw <- function(MeasurementsFile_standardized_matched_refined = "",
                         Level = c("main_class","sub_class","abbrev")[2],
                         GroupScheme = c(rep(c("Epi", "Peri"),c(3,3))),
-                        PlotSpecific = c("main_class","Ceramides [SP02]"),
+                        PlotSpecific = "",
                         KeywordSelected = "adi"){
   
   cat("Processing",Refined_MeasurementsFile,"...\n")
@@ -785,20 +790,21 @@ HeatMapDraw <- function(MeasurementsFile_standardized_matched_refined = "",
                                  column_split = annotation_col$Condition,
                                  fontsize = 12)
   dev.off()
-  
-  #Plot designed pathway
-  Forplot <- MF_STD %>% filter(!!as.name(PlotSpecific[1]) == PlotSpecific[2]) %>% 
-    select_at(vars(starts_with(KeywordSelected))) %>% as.data.frame()
-  rownames(Forplot) <- make.names(Forplot$abbrev, unique = TRUE)
-  
-  pdf(paste0(prefix,"_",paste0(PlotSpecific,collapse = "_"),"_features_heatmap.pdf"), width = 10, height = 10)
-  p <- ComplexHeatmap::pheatmap(Forplot, scale = "row", cluster_rows = T, cluster_cols = T,
-                                show_rownames = T, show_colnames = T,
-                                annotation_col = annotation_col, annotation_colors = ann_colors, 
-                                annotation_legend = FALSE, annotation_names_col = FALSE,
-                                annotation_names_row = F, column_split = annotation_col$Condition,
-                                fontsize = 12)
-  dev.off()
+  if(PlotSpecific != ""){
+    #Plot designed pathway
+    Forplot <- MF_STD %>% filter(!!as.name(PlotSpecific[1]) == PlotSpecific[2]) %>% 
+      select_at(vars(starts_with(KeywordSelected))) %>% as.data.frame()
+    rownames(Forplot) <- make.names(Forplot$abbrev, unique = TRUE)
+    
+    pdf(paste0(prefix,"_",paste0(PlotSpecific,collapse = "_"),"_features_heatmap.pdf"), width = 10, height = 10)
+    p <- ComplexHeatmap::pheatmap(Forplot, scale = "row", cluster_rows = T, cluster_cols = T,
+                                  show_rownames = T, show_colnames = T,
+                                  annotation_col = annotation_col, annotation_colors = ann_colors, 
+                                  annotation_legend = FALSE, annotation_names_col = FALSE,
+                                  annotation_names_row = F, column_split = annotation_col$Condition,
+                                  fontsize = 12)
+    dev.off()
+  }
   
   #Heatmaps of category/main_class/sub_class/abbrev levels
   MF_STD_grouped <- MF_STD %>% group_split(category, .keep = TRUE)
