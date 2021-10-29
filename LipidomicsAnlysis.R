@@ -1,7 +1,7 @@
 #=========================================================================================
 # This script contain main functions used for lipidomics analysis
 # 
-# Version 1.4.1 created by Houyu Zhang on 2021/10/28
+# Version 1.4.2 created by Houyu Zhang on 2021/10/29
 # Issue report on Hughiez047@gmail.com
 # Copyright (c) 2021 __CarlosLab@PKU__. All rights reserved.
 #=========================================================================================
