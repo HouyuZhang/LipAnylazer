@@ -210,7 +210,7 @@ Format_mummichog_input <- function(MeasurementsFile_standardized = "",
 
 mummichog_Functional_analysis <- function(pktablePath = "", 
                                           PvalueThreshold = 0.2, 
-                                          Species = c("mmu","hsa")[2],
+                                          Species = c("mmu","hsa")[1],
                                           rowNormMet = c("SumNorm","NULL")[2],
                                           EnrichType = c("KEGG","MainClass","SubClass")[c(1,2)],
                                           SamplesDel = ""){
@@ -230,12 +230,10 @@ mummichog_Functional_analysis <- function(pktablePath = "",
     grp.nm.vec <- c("")
     FunAnalysis <- UpdateData(FunAnalysis)
   }
-  
+
   FunAnalysis <- PreparePrenormData(FunAnalysis)
-  FunAnalysis <- Normalization(FunAnalysis, rowNorm = rowNormMet, transNorm = "NULL", scaleNorm = "NULL",
-                               ratio = FALSE, ratioNum = 20)
-  FunAnalysis <- Ttests.Anal(FunAnalysis, nonpar = F, threshp = 0.05, paired = FALSE, 
-                             equal.var = T, pvalType = "raw", all_results = T)
+  FunAnalysis <- Normalization(FunAnalysis, rowNorm = rowNormMet, transNorm = "NULL", scaleNorm = "NULL", ratio = FALSE, ratioNum = 20)
+  FunAnalysis <- Ttests.Anal(FunAnalysis, nonpar = F, threshp = 0.05, paired = FALSE, equal.var = T, pvalType = "raw", all_results = T)
   FunAnalysis <- Convert2Mummichog(FunAnalysis, rt = T) # mummichog_input: m.z, r.tm p.value, t.score
   FunAnalysis <- InitDataObjects("mass_table", anal.type = "mummichog", paired = FALSE)
   FunAnalysis <- SetPeakFormat(FunAnalysis, type = "mprt")
@@ -250,22 +248,26 @@ mummichog_Functional_analysis <- function(pktablePath = "",
   if ("KEGG" %in% EnrichType){
     #Do KEGG analysis (This need more significant lipid for enrichment)
     FunAnalysis <- PerformPSEA(FunAnalysis, lib = paste0(Species,"_kegg"), libVersion = "current", minLib = 3, permNum = 50)
-    FunAnalysis <- PlotPeaks2Paths(FunAnalysis, paste0(prefix,"_peaks_to_KEGG_"), "pdf", dpi = 100, width=NA)
+    FunAnalysis <- PlotPeaks2Paths(FunAnalysis, paste0(prefix,"_peaks_to_KEGG_Pvalue",PvalueThreshold,"_"), "pdf", dpi = 100, width=NA)
+    file.rename("mummichog_pathway_enrichment.csv", paste0(prefix,"_","mummichog_pathway_enrichment_KEGG_Pvalue",PvalueThreshold,".csv"))
+    file.rename("mummichog_matched_compound_all.csv", paste0(prefix,"_","mummichog_matched_compound_all_KEGG_Pvalue",PvalueThreshold,".csv"))
   }
   if ("MainClass" %in% EnrichType){
     FunAnalysis <- PerformPSEA(FunAnalysis, lib = "main_lipid_class_mset", libVersion = "current", minLib = 3, permNum = 50)
-    FunAnalysis <- PlotPeaks2Paths(FunAnalysis, paste0(prefix,"_peaks_to_MLC_"), format = "pdf", dpi = 100, width=NA)
+    FunAnalysis <- PlotPeaks2Paths(FunAnalysis, paste0(prefix,"_peaks_to_MLC_Pvalue",PvalueThreshold,"_"), format = "pdf", dpi = 100, width=NA)
+    file.rename("mummichog_pathway_enrichment.csv", paste0(prefix,"_","mummichog_pathway_enrichment_MainClass_Pvalue",PvalueThreshold,".csv"))
+    file.rename("mummichog_matched_compound_all.csv", paste0(prefix,"_","mummichog_matched_compound_all_MainClass_Pvalue",PvalueThreshold,".csv"))
   }
   if ("SubClass" %in% EnrichType){
     FunAnalysis <- PerformPSEA(FunAnalysis, lib = "sub_lipid_class_mset", libVersion = "current", minLib = 3, permNum = 50)
-    FunAnalysis <- PlotPeaks2Paths(FunAnalysis, paste0(prefix,"_peaks_to_SLC_"), "pdf", dpi = 100, width=NA)
+    FunAnalysis <- PlotPeaks2Paths(FunAnalysis, paste0(prefix,"_peaks_to_SLC_Pvalue",PvalueThreshold,"_"), "pdf", dpi = 100, width=NA)
+    file.rename("mummichog_pathway_enrichment.csv", paste0(prefix,"_","mummichog_pathway_enrichment_SubClass_Pvalue",PvalueThreshold,".csv"))
+    file.rename("mummichog_matched_compound_all.csv", paste0(prefix,"_","mummichog_matched_compound_all_SubClass_Pvalue",PvalueThreshold,".csv"))
   }
   #Rename intermediate files
-  for (file in c("mum_raw.qs","complete_norm.qs","row_norm.qs","prenorm.qs",
-                 "preproc.qs","data_orig.qs",paste0("mummichog_input_",dataValue,".txt"),
-                 "t_test.csv","t_test_all.csv","scattermum.json",
-                 "mummichog_query.json","mummichog_pathway_enrichment.csv",
-                 "mum_res.qs","mummichog_matched_compound_all.csv","initial_ecs.qs")){
+  for (file in c("mum_raw.qs","complete_norm.qs","row_norm.qs","prenorm.qs", "preproc.qs",
+                 "data_orig.qs",paste0("mummichog_input_",dataValue,".txt"),
+                 "t_test.csv","t_test_all.csv","scattermum.json", "mummichog_query.json", "mum_res.qs","initial_ecs.qs")){
     file.rename(file, paste0(prefix,"_",file))
   }
 }
@@ -279,7 +281,7 @@ mummichog_Functional_analysis <- function(pktablePath = "",
 Replot_mummichog <- function(mummichog_PEpath = ""){
 
   PathwayList <- c()
-  for (file in list.files(mummichog_PEpath, pattern = "mummichog_pathway_enrichment.csv")){
+  for (file in list.files(mummichog_PEpath, pattern = "mummichog_pathway_enrichment.*csv")){
     PathwayList <- c(PathwayList, read.csv(file)[,1])
   }
   PathwayList <- unique(PathwayList)
@@ -288,9 +290,9 @@ Replot_mummichog <- function(mummichog_PEpath = ""){
   PathwayInte = data.frame(matrix(nrow=0, ncol = length(names_)))
   colnames(PathwayInte) <- names_
   
-  for (file in list.files(mummichog_PEpath, pattern = "mummichog_pathway_enrichment.csv")){
-    tmp <- read_csv(file) %>% rename_(MainClass = names(.)[1]) %>%
-      mutate(Condition = gsub("_mummichog_pathway_enrichment.csv","",file), 
+  for (file in list.files(mummichog_PEpath, pattern = "mummichog_pathway_enrichment.*csv")){
+    tmp <- read_csv(file, show_col_types = F) %>% rename_(MainClass = names(.)[1]) %>%
+      mutate(Condition = gsub("_mummichog_pathway_enrichment|\\.csv","",file), 
              mLogadjP = -log10(Gamma), EnrFactor = Hits.sig/Expected) %>%
       select(MainClass,Condition, mLogadjP, EnrFactor) %>%
       filter(mLogadjP > 1.3)
@@ -299,12 +301,12 @@ Replot_mummichog <- function(mummichog_PEpath = ""){
     tmp2 = data.frame(matrix(nrow=length(added), ncol = length(names_)))
     colnames(tmp2) <- names_
     tmp2$MainClass <- added
-    tmp2$Condition <- gsub("_mummichog_pathway_enrichment.csv","",file)
+    tmp2$Condition <- gsub("_mummichog_pathway_enrichment|\\.csv","",file)
     tmp <- tmp %>% add_row(tmp2)
     PathwayInte <- rbind(PathwayInte, tmp)
   }
   PathwayInte$Condition <- gsub(".*_","",PathwayInte$Condition)
-  pdf(paste0("PathwayEnrichement_compre_",Sys.Date(),".pdf"), width = 8, height = 8)
+  pdf(paste0("PathwayEnrichment_compare_",Sys.Date(),".pdf"), width = 8, height = 8)
   p <- ggplot(PathwayInte,aes(x = Condition, y = MainClass, size = EnrFactor, color = mLogadjP)) +
     geom_point() + 
     scale_color_gradient(low="white", high="red") +
@@ -870,7 +872,6 @@ HeatMapDraw <- function(MeasurementsFile_standardized_matched_refined = "",
     fileName <- paste0(prefix,"_mummichogInput_",paste0(SelectedSample, collapse = "+"),".csv")
     write.csv(file = fileName, tmp, row.names = F, quote = F)
   }
-  
 
   # lipid_cert_exp1_ma <- read_csv("lipid_cert_exp1_ma.csv")
   # certmaexp1_pvalue_distinct <- read_csv("certmaexp1_pvalue_distinct.csv")
@@ -970,13 +971,13 @@ HeatMapDraw <- function(MeasurementsFile_standardized_matched_refined = "",
 # T_Anavo_plotting(PlotFile = "refinedDF_5depots_abbrev_anova_posthoc.csv",
 #                  SigIndex = c("p_value","fdr")[1],ThresholdSig = 0.005,TopShown = 10)
 # 
- HeatMapDraw(DataFile = "Epi_Peri.csv",
-             KeywordSelected = "G",
-             GroupAccordingTo = "main_class",
-             PlotSpecific = c("main_class","Ceramides [SP02]"),
-             GroupScheme = c(rep(c("Epi", "Peri"),c(3,3)))
-             
- )
+ # HeatMapDraw(DataFile = "Epi_Peri.csv",
+ #             KeywordSelected = "G",
+ #             GroupAccordingTo = "main_class",
+ #             PlotSpecific = c("main_class","Ceramides [SP02]"),
+ #             GroupScheme = c(rep(c("Epi", "Peri"),c(3,3)))
+ #             
+ # )
  
 # Analyze_Lipids(STD_MeasurementsFile = "refinedDF_5depots.csv",
 #               OutputPairWise = T,
