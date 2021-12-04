@@ -1,7 +1,7 @@
 #=========================================================================================
 # This script contain main functions used for lipidomics analysis
 # 
-# Version 1.4.1 created by Houyu Zhang on 2021/10/28
+# Version 1.4.2 created by Houyu Zhang on 2021/12/04
 # Issue report on Hughiez047@gmail.com
 # Copyright (c) 2021 __CarlosLab@PKU__. All rights reserved.
 #=========================================================================================
@@ -305,7 +305,7 @@ Replot_mummichog <- function(mummichog_PEpath = ""){
     tmp <- tmp %>% add_row(tmp2)
     PathwayInte <- rbind(PathwayInte, tmp)
   }
-  PathwayInte$Condition <- gsub(".*_","",PathwayInte$Condition)
+  PathwayInte$Condition <- gsub(".*mummichogInput_|_Pvalue.*","",PathwayInte$Condition)
   pdf(paste0("PathwayEnrichment_compare_",Sys.Date(),".pdf"), width = 8, height = 8)
   p <- ggplot(PathwayInte,aes(x = Condition, y = MainClass, size = EnrFactor, color = mLogadjP)) +
     geom_point() + 
@@ -705,7 +705,7 @@ Analyze_Lipids <- function(MeasurementsFile_standardized_matched_refined = "",
                            KeywordSelected = "adi",
                            run_RunMetaboAnalystR = T){
   
-  LipidLevels <- c("compound","category","main_class","sub_class","abbrev")
+  LipidLevels <- c("compound","category","main_class","sub_class","abbrev")[5]
   prefix <- file_path_sans_ext(MeasurementsFile_standardized_matched_refined)
   
   for (level in LipidLevels){
