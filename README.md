@@ -1,7 +1,5 @@
 # A unified pipeline for modular lipidomics analysis
-**:writing_hand:Author**: Houyu Zhang and Detian Hu
-
-**:email:Email**: Hughiez047@gmail.com
+**:writing_hand:Author**: Houyu Zhang and Detian Hu  **:email:Email**: Hughiez047@gmail.com
 
 Copyright (c) 2021 CarlosLab@PKU. All rights reserved.
 
