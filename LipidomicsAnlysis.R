@@ -705,7 +705,7 @@ Analyze_Lipids <- function(MeasurementsFile_standardized_matched_refined = "",
                            KeywordSelected = "adi",
                            run_RunMetaboAnalystR = T){
   
-  LipidLevels <- c("compound","category","main_class","sub_class","abbrev")[5]
+  LipidLevels <- c("compound","category","main_class","sub_class","abbrev")[c(1,3,4,5)]
   prefix <- file_path_sans_ext(MeasurementsFile_standardized_matched_refined)
   
   for (level in LipidLevels){
