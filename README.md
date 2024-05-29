@@ -1,7 +1,7 @@
 # :hammer_and_wrench:A unified pipeline for modular lipidomics analysis
-**:writing_hand:Author**: Houyu Zhang  **:email:Email**: houyuzhang@stu.pku.edu.cn
+**:writing_hand:Author**: Houyu Zhang 
 
-Copyright (c) 2021 CarlosLab@PKU. All rights reserved.
+Copyright (c) 2024 CarlosLab@PKU. All rights reserved.
 
 ## Introduction
 
@@ -15,3 +15,5 @@ This pipeline was written in R language using publishable grammar with well-docu
 
 - R codes for all analysis were listed.
 
+### Citation
+[Sphingomyelin Is Involved in Regulating UCP1-Mediated Non-Shivering Thermogenesis](https://www.jlr.org/article/S0022-2275(24)00064-6/fulltext)
